@@ -1,0 +1,23 @@
+
+# Change features that have a high NaN count 
+> ask professor how many percent of NaN is acceptable for it to fit in the model 
+  the prof would most likely say, depends on the accuracy and impute of the model
+  however, for example the max that has to be dropped 
+
+> find different alcohol related features, since the ones that are in the subset right now 
+  the NaN count is too high 
+  > BD1_11: 616 | (18.5%)
+  > BD2_31: 1386 | (41.6%)
+  > figure out which ones are viable based on the codebook 
+
+# figure out SMOTE and train test split 
+
+> if they were executed and the flow is proper; focus more on understanding 
+
+
+# things that need to be added for submitting Milestone #2 
+
+> PyCaret Model Screening => Selection of Top 3 Models (Criteria: AUC score)
+    > ### Performance scores: AUC accuracy가 0.8이상이 나와야한다  // F1 score: 0.5이상 
+
+> Visualization of Confusion Metrics, Feature Importance, and ROC Curve for the Top 3 Models

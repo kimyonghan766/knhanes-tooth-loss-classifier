@@ -1,0 +1,59 @@
+Form a project team and submit a project proposal.
+
+1 Write the Project Proposal
+
+- Project Objective:
+    > the objective of the project is to determine the feature importance and predicted O_TC natural teeth count of individuals based
+    on 11 variables; these variables are mainly:
+        :  ---------------------------- : 
+        > | Current Smoking Status      |
+        > | Avg Daily Cigarettes        | Continuous
+        > | Alcohol Frequency (last yr) |
+        > | Binge Drinking Frequency    |
+        > | Education Level             |
+        > | Household Income Quartile   |
+        > | Chewing Discomfort          |
+        > | Unmet Dental Care Need      | Binary (0/1)
+
+- Data Collection (Structured Data, Supervised Learning)
+    > Structured data based on the .csv file of KNHANES 9th edition (2022-2024 surveys) regarding overall health -- focusing on 
+    smoking status, socioeconomic class, and alcohol intake; where SES is the most dominant and relevant, smoking status comes after, then 
+    alcohol intake
+    > Supervised learning: Where the data gathered already has labels attached -- data for training the model. Since the csv file has continuous 
+    and ordinal data linked to each code or variable, this determines the learning to be supervised. 
+
+- Data EDA (Exploratory Data Analysis)
+    > Analyze Raw data sets 
+    > Summarize the main characteristics 
+    > Uncover hidden patterns / trends / anomalies before complex modeling 
+
+- Preprocessing: 
+    > Categorical data modification: Random forest uses ordinal data (however the intensity should be in the same direction ex. 1 lowest 4 highest of something)
+    > missing value handling: handle values of 888, 818, etc. // reduce or merge ordinal data per feature if they have high similarities 
+        ex. non smoker and never smoked could be merged into one ordinal value  
+    > outlier handling:
+        > Interquartile Range (IQR): Defines outliers as values falling below or above . This is ideal for skewed data.
+        > Z-Score (Standard Deviation): Identifies points more than 3 standard deviations from the mean (). This assumes the data follows a normal distribution.
+        > Visualizations: Using Box Plots or Histograms provides a quick visual check for extreme values.
+        > Algorithmic Detection: For high-dimensional data, use Isolation Forest or Local Outlier Factor (LOF) to isolate anomalies
+    > standardization
+        > train test split, fit, transform methods, others would be defined later on 
+    > class imbalance resolution
+        > ages 1-18 would automatically be removed since they are minors and have a very low chance of smoking and alcohol intake;
+        > youths and middle aged people (below 50 years old) would be removed since they have an unlikely chance of having teeth less than 20 (natural teeth)
+            > the reference for this would be
+        > the dataset presents data of individuals until 80 years old, no one older. Therefore sample class should be individuals aged 50-80
+    > hyperparameter tuning
+
+- PyCaret Model Screening => Selection of Top 3 Models (Criteria: AUC score)
+    - ### Performance scores: AUC accuracy가 0.8이상이 나와야한다  // F1 score: 0.5이상 
+
+- Visualization of Confusion Metrics, Feature Importance, and ROC Curve for the Top 3 Models
+
+
+
+
+
+2 Submission Files: Report File (Word), Analysis Code (IPynb), Original Analysis Data
+
+3 Submission Date: May 25, 2026, 23:29
