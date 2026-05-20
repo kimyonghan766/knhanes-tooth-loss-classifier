@@ -1,2 +1,2 @@
 # O_TC-COUNT
-Machine learning algorithm for O_TC (Natural Teeth count) based on smoking, SES, and alcohol intake 
+Binary classification of severe tooth loss (<20 teeth) in Korean adults aged 50+ using KNHANES IX survey data. Compares Logistic Regression, SVM, and KNN with SMOTE-based class balancing.
