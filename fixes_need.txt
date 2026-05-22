@@ -21,3 +21,25 @@
     > ### Performance scores: AUC accuracy가 0.8이상이 나와야한다  // F1 score: 0.5이상 
 
 > Visualization of Confusion Metrics, Feature Importance, and ROC Curve for the Top 3 Models
+
+
+1. Features may not strongly predict tooth loss
+Your current features — income, education, drinking (BD1/BD1_11), smoking (BS1_1), and body measurements (BM7/BM14) — are indirect risk factors. The strongest known predictors of tooth loss are typically absent here: diabetes status, dental visit frequency, oral hygiene habits, hypertension. These exist in KNHANES. Adding even one strong clinical predictor (e.g. diabetes) could meaningfully move AUC.
+
+2. BD1_11 has 6.1% NaN — check if it's even useful
+If BD1_11 is a sub-question of BD1 (e.g. only answered by drinkers), it's essentially a sparse conditional feature. Median imputation fills in noise, not signal. Check its correlation with O_TC_ and consider dropping it if low.
+
+3. Check what's actually separating the classes
+Run this before trying more models:
+
+
+import seaborn as sns
+corr = df_subset.drop(columns=['O_TC']).corr()['O_TC_'].drop('O_TC_').sort_values()
+print(corr)
+If no feature has |correlation| > 0.15 with the target, you have a weak-signal problem that no model or tuning will fix — you need better features.
+
+4. Reconsider the binary threshold
+O_TC_ = 1 if < 20 teeth captures severe tooth loss (~27% of your sample). The boundary between 19 and 20 teeth may not be as clinically sharp as expected — someone with 20 teeth vs 18 is not dramatically different. Consider whether a different threshold (e.g. < 15 for very severe loss) produces a more separable problem, or whether framing it as a 3-class problem helps.
+
+The short answer: the leakage fix revealed your real model performance. The ceiling is your feature quality, not the models. Adding KNHANES variables directly related to oral health or chronic disease is the highest-leverage fix.
+
