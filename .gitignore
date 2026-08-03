@@ -20,3 +20,6 @@ build/
 # IDE
 .idea/
 .vscode/
+
+# CatBoost training artefacts
+catboost_info/
