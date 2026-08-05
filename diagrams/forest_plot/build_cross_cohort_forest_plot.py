@@ -10,8 +10,11 @@ cohort's aOR table (no re-fitting needed — the svyglm output is already saved
 as text in the notebook, so this script just parses it and plots; it does not
 re-run the R/rpy2 pipeline).
 
-Occupation dummies (occp_2..occp_7) and the intercept are excluded — 18 core
+Occupation dummies (occp_2..occp_7) and the intercept are excluded — 17 core
 pre-specified covariates only (systemic, socioeconomic, behavioral blocks).
+brush_freq is excluded from the pre-specified model itself (not just this plot):
+plausibly a CONSEQUENCE of tooth loss rather than an antecedent, the same
+temporality objection noted for O_pain/MO4_00/OR1 in the ML arm (§9.5) — see §11.3.
 
 Elsevier artwork spec targeted (same as the calibration-curve companion
 figure — general Elsevier artwork instructions, no Journal of Dentistry
@@ -55,7 +58,6 @@ VAR_ORDER = [
     ("Behavioral",    "BD1",          "Current alcohol drinker (yes vs no)"),
     ("Behavioral",    "pa_aerobic",   "Aerobic activity adherent (yes vs no)"),
     ("Behavioral",    "BP1",          "Perceived stress (higher = more)"),
-    ("Behavioral",    "brush_freq",   "Brushing frequency (occasions/day)"),
     ("Behavioral",    "N_TDF",        "Dietary fiber intake (g/day)"),
     ("Behavioral",    "N_CA",         "Calcium intake (mg/day)"),
 ]

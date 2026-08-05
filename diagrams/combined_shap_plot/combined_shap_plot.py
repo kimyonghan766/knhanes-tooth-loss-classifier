@@ -1,21 +1,25 @@
 """
 Combined mean |SHAP| feature-importance chart, ≥50 vs ≥65 cohort, side by side.
 
-Run the new "Save mean |SHAP| ..." cell in final.ipynb and final(65+).ipynb first
+Run the "Save mean |SHAP| ..." cell in final.ipynb and final(65+).ipynb first
 (inserted right after the existing "Global feature importance" bar-plot cell) —
 each writes an .npz with feature_names / mean_abs_shap / model_name into Main/.
-Then run this script from Main/:
+Then run this script from anywhere:
 
     python3 combined_shap_plot.py
 """
+import os
 import numpy as np
 import matplotlib.pyplot as plt
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+MAIN = os.path.join(HERE, "..", "..", "Main")   # repo-root Main/, two levels up from this script
 
 N_DISPLAY = 20
 
 COHORTS = [
-    {"label": "≥50 cohort", "npz": "shap_importance_50plus.npz"},
-    {"label": "≥65 cohort", "npz": "shap_importance_65plus.npz"},
+    {"label": "≥50 cohort", "npz": os.path.join(MAIN, "shap_importance_50plus.npz")},
+    {"label": "≥65 cohort", "npz": os.path.join(MAIN, "shap_importance_65plus.npz")},
 ]
 
 
@@ -28,7 +32,7 @@ def load_top_features(npz_path, n_display=N_DISPLAY):
     return names[order][::-1], values[order][::-1], model_name
 
 
-def plot_combined(cohorts, out_path="combined_shap_importance.png"):
+def plot_combined(cohorts, out_path=os.path.join(HERE, "combined_shap_importance.png")):
     fig, axes = plt.subplots(
         1, len(cohorts),
         figsize=(6.5 * len(cohorts), 4.5),
