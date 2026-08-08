@@ -32,8 +32,10 @@ Both notebooks share the same preprocessing, feature engineering, model set, tun
 | Source | KNHANES 2020–2024 (`HN20_all.csv` – `HN24_all.csv`) | same |
 | Target | `O_TC_` — `1` if tooth count < 20, `0` if ≥ 20 | same |
 | ML sample (train + test) | 14,871 (11,536 train / 3,335 test) | 7,704 (5,946 train / 1,758 test) |
-| Inferential complete-case n | 11,781 | 5,832 |
-| Tooth-loss prevalence (complete-case) | 25.0% | 40.1% |
+| Inferential complete-case n | *pending rerun* | *pending rerun* |
+| Tooth-loss prevalence (complete-case) | *pending rerun* | *pending rerun* |
+
+The two numbers above described §11.3's complete-case sample specifically; §11 and §9.12 each have their own (different) complete-case n depending on which covariates' missingness applies. §11.3 has been retired (see [Inferential Analysis](#inferential-analysis)) — re-run both notebooks and fill in §11's and §9.12's printed `Complete-case n` / prevalence here.
 
 The < 20 threshold follows clinical literature establishing functional impairment in chewing and digestion. The ML sample uses mode/median imputation (see Pipeline); the inferential sample is complete-case only — see the caveat under [Inferential Analysis](#inferential-analysis).
 
@@ -41,30 +43,31 @@ The < 20 threshold follows clinical literature establishing functional impairmen
 
 ## Features
 
-Candidate variables are drawn from KNHANES and one-hot encoded where nominal. The **pre-specified inferential model** (§11.3 in each notebook) uses a smaller, theory-driven subset of these — marked with `*` below.
+Candidate variables are drawn from KNHANES and one-hot encoded where nominal. Two survey-weighted regressions are reported (see [Inferential Analysis](#inferential-analysis)): **§11**, a fixed, full-candidate model (nearly everything below except a short ML-only list), and **§9.12**, a data-driven model that refits whichever top-15 variables SHAP ranks highest per cohort — that set isn't fixed in advance, so it can't be marked in a static table; check each notebook's own §9.12 output for the current list. The column below reflects §11 only. (The previously reported pre-specified model, §11.3, used a smaller theory-driven 18-variable subset of these; it has been retired in favor of the SHAP-informed model.)
 
 ### Core Exposures
 
-| Column | Type | Description | In inferential model |
+| Column | Type | Description | In §11 (full model) |
 |--------|------|-------------|:---:|
 | `eGFR` | Derived (continuous) | Estimated GFR via CKD-EPI 2021 equation (from `HE_crea` + age + sex) | ✓ |
 | `diabetes` | Binary | `DE1_dg == 1` OR `HE_HbA1c ≥ 6.5%` — combined criterion | ✓ |
-| `hypertension` | Binary | `HE_sbp ≥ 140` OR `HE_dbp ≥ 90` | ✓ |
+| `hypertension` | Binary | `HE_sbp ≥ 140` OR `HE_dbp ≥ 90` | ML only — §11 uses `HE_sbp`/`HE_dbp` directly instead |
 | `ho_incm` | Ordinal (1–4) | Household income quartile | ✓ |
 | `edu` | Ordinal (1–4) | Education level (1 = ≤ elementary, 4 = ≥ college) | ✓ |
 
 ### SES / Demographics
 
-| Column | Description | In inferential model |
+| Column | Description | In §11 (full model) |
 |--------|-------------|:---:|
 | `occp` | Occupation (7 categories; reference = Managers/Professionals) | ✓ |
 | `sex` | Biological sex | ✓ (as `sex_female`) |
-| `age` | Chronological age (top-coded at 80) | ✓ (restricted cubic spline) |
+| `age` | Chronological age (top-coded at 80) | ✓ (restricted cubic spline in §11; linear in §9.12) |
 | `town_t` | Urban (1) vs. rural (0) residence | ✓ |
-| `region` | 17 regional provinces | ML only — no valid linear encoding for regression |
-| `marri_1` / `marri_2` | Marital status (basic / detailed) | ML only |
-| `genertn` | Household generation composition | ML only |
-| `fam_rela` | Relationship to household head | ML only |
+| `region` | 17 regional provinces | ✓ (16 dummies, reference = code 1) |
+| `marri_1` | Marital status (basic) | ML only — exact function of `marri_2`, dropped to avoid a zero-variance column |
+| `marri_2` | Marital status (detailed) | ✓ (5 dummies, reference = married/cohabiting) |
+| `genertn` | Household generation composition | ✓ (6 dummies) |
+| `fam_rela` | Relationship to household head | ✓ (7 dummies) |
 | `house` | Home ownership | ML only |
 | `cfam` | Household size | ML only |
 | `live_t` | Dwelling type | ML only |
@@ -72,30 +75,30 @@ Candidate variables are drawn from KNHANES and one-hot encoded where nominal. Th
 
 ### Lifestyle
 
-| Column | Description | In inferential model |
+| Column | Description | In §11 (full model) |
 |--------|-------------|:---:|
 | `sm_presnt` | Current smoker (1 = yes) | ✓ |
 | `BD1` | Lifetime alcohol experience (1 = yes, 0 = no) | ✓ |
 | `pa_aerobic` | Meets aerobic physical activity guidelines | ✓ |
 | `BP1` | Perceived stress (reversed: higher = more stressed) | ✓ |
-| `brush_freq` | Brushing occasions yesterday (sum of `BM1_1`–`BM1_8`, 0–8) | ML only |
+| `brush_freq` | Brushing occasions yesterday (sum of `BM1_1`–`BM1_8`, 0–8) | ML only — temporality (recorded for "yesterday", after the outcome accumulated) |
 
 ### Clinical / Lab
 
-| Column | Description | In inferential model |
+| Column | Description | In §11 (full model) |
 |--------|-------------|:---:|
 | `HE_HbA1c` | HbA1c (%) | ML only (feeds `diabetes`) |
 | `HE_BMI` | BMI (kg/m²) | ✓ |
-| `HE_sbp` / `HE_dbp` | Systolic / diastolic blood pressure | ML only (feeds `hypertension`) |
+| `HE_sbp` / `HE_dbp` | Systolic / diastolic blood pressure | ✓ (used directly, not via a derived `hypertension` flag) |
 | `HE_Uacid` | Serum uric acid (mg/dL) | ✓ |
-| `HE_Upro` | Urinary protein (proteinuria grade) | ML only |
-| `HE_Ucrea` | Urinary creatinine | ML only |
+| `HE_Upro` | Urinary protein (proteinuria grade) | ✓ |
+| `HE_Ucrea` | Urinary creatinine | ✓ |
 | `HE_TG` | Triglycerides (mg/dL) | ✓ |
-| `HE_chol` / `HE_HDL_st2` | Total / HDL cholesterol | ML only |
+| `HE_chol` / `HE_HDL_st2` | Total / HDL cholesterol | ✓ |
 
 ### Dietary
 
-`N_CA` (calcium, ✓ inferential), `N_NA` (sodium), `N_PROT` (protein), `N_TDF` (fiber, ✓ inferential), `LS_VEG1` (vegetable intake), `LS_FRUIT` (fruit intake), `N_SUGAR` (sugar), `L_BR_FQ` (meal frequency) — remainder ML only.
+`N_CA` (calcium), `N_NA` (sodium), `N_PROT` (protein), `N_TDF` (fiber), `LS_VEG1` (vegetable intake), `LS_FRUIT` (fruit intake), `N_SUGAR` (sugar) are all ✓ in §11. `L_BR_FQ` (meal frequency) is ML only.
 
 ### Dental
 
@@ -113,7 +116,7 @@ Candidate variables are drawn from KNHANES and one-hot encoded where nominal. Th
 3. eGFR derivation using CKD-EPI 2021 creatinine equation
 4. Derived features: `diabetes` (combined criterion), `hypertension`, `brush_freq`
 5. `BD1` recode (KNHANES 1/2 → 1/0); `BP1` reversal (higher = more stressed)
-6. Inferential model only: `age` entered as a restricted cubic spline (knots vary by cohort — see notebook §11.3)
+6. §11 only: `age` entered as a restricted cubic spline (knots vary by cohort). §9.12 (SHAP-informed model) deliberately leaves `age` linear instead, to match the ML arm's feature representation.
 
 ### Train / Test Split (Temporal)
 
@@ -181,45 +184,20 @@ Note the simpler Logistic Regression wins the 65+ cohort's model-selection metri
 
 ## Inferential Analysis
 
-Survey-weighted multivariable logistic regression (`svyglm`, Taylor linearization) on the complete-case subset, pre-specified independently of the SHAP results (theory-driven covariate list, no circularity with the ML arm).
+Two survey-weighted logistic regressions (`svyglm`, Taylor linearization) are reported per cohort, on the complete-case subset:
 
-**Adjusted Odds Ratios (aOR) — 50+ cohort, n = 11,781, prevalence = 25.0%:**
+- **§11 — Full exploratory model.** Nearly every candidate KNHANES predictor (~32 terms after dummy-encoding; see [Features](#features) for the exact list). Holm (FWER) + Benjamini-Hochberg (FDR) corrected across all terms, since this is a broad, un-restricted search and several nominally-significant rows are expected by chance alone.
+- **§9.12 — SHAP-informed confirmatory model.** Bridges the ML and inferential arms: refits the top-15 predictors by mean(|SHAP|) from the tuned best model (`TOP_N_SHAP` in the notebook) as a design-weighted regression, giving aOR + 95% CI for exactly the variables the ML model relied on most. Also Holm/BH corrected — its covariates are SHAP-*selected* rather than fixed in advance, so its p-values are post-selection and the notebook itself labels this table exploratory, not confirmatory in the pre-registered sense.
 
-| Variable | aOR | 95% CI | p-value |
-|----------|-----|--------|---------|
-| Current smoker | 1.99 | [1.67, 2.38] | **< 0.001** |
-| Diabetes (combined criterion) | 1.40 | [1.24, 1.59] | **< 0.001** |
-| Occupation: Craft/Trade (`occp_4`) | 1.50 | [1.06, 2.13] | **0.023** |
-| Occupation: Machine op. (`occp_5`) | 1.38 | [0.99, 1.92] | 0.054 |
-| Occupation: Elementary (`occp_6`) | 1.33 | [0.95, 1.85] | 0.098 |
-| Triglycerides | 1.0009 | [1.0003, 1.0015] | **0.006** |
-| Female sex | 0.75 | [0.65, 0.86] | **< 0.001** |
-| Education level | 0.78 | [0.74, 0.83] | **< 0.001** |
-| Urban residence | 0.76 | [0.67, 0.87] | **< 0.001** |
-| Income quartile | 0.88 | [0.83, 0.93] | **< 0.001** |
-| Dietary fiber (`N_TDF`) | 0.989 | [0.984, 0.994] | **< 0.001** |
-| eGFR | 1.0002 | [0.9956, 1.0047] | 0.942 |
-| Hypertension | 0.94 | [0.82, 1.09] | 0.417 |
-| Alcohol experience | 0.89 | [0.76, 1.03] | 0.123 |
-| Physical activity (aerobic) | 0.93 | [0.82, 1.06] | 0.291 |
-| Uric acid | 1.005 | [0.956, 1.056] | 0.851 |
-| Calcium intake | 0.9999 | [0.9997, 1.0001] | 0.469 |
-| Perceived stress | 0.994 | [0.922, 1.073] | 0.887 |
+The previously reported **pre-specified model (§11.3)** — an 18-covariate, theory-driven set fixed independently of SHAP, used specifically so agreement with the SHAP arm counted as genuine triangulation rather than circular self-confirmation — has been retired. The SHAP-informed model above is now the sole data-driven arm; its own VIF check (§9.13) and analytic-sample-composition / dietary-sensitivity refit (§9.14) replace the diagnostics §11.3 used to carry.
 
-Age is entered as a restricted cubic spline (4 knots); a design-based Wald test found no evidence against linearity (p = 0.43).
+> **Numbers below need a fresh notebook run.** Removing §11.3 and raising `TOP_N_SHAP` from 10 to 15 changed both models' printed output, so the aOR/CI/p-value tables previously reproduced here (which described §11.3's now-retired 18-variable fit) have been removed rather than left stale. Re-run §9.9 → §9.14 and §11 in both notebooks, then paste the printed `or_table` (§11) / `or_table_shap` (§9.12) outputs back into this section.
 
-**Key findings:**
-- Smoking is the strongest modifiable risk factor (aOR ≈ 1.99, p < 0.001)
-- Diabetes remains an independent risk factor after adjustment (aOR ≈ 1.40, p < 0.001)
-- Education, income, urban residence, and dietary fiber are protective; female sex is protective
-- eGFR is **not** an independent predictor after adjustment (p = 0.94)
-- Craft/trade occupation carries elevated risk vs. the managerial/professional reference
+**Directionally consistent across prior runs of this pipeline** (magnitudes will shift now that §11.3 is retired, and need reconfirming from a fresh run): smoking and diabetes as risk factors; education, income, urban residence, dietary fiber, and female sex as protective; eGFR has never been an independent predictor after full adjustment (p ≈ 0.9 in both cohorts) despite being the project's primary CKD exposure of interest.
 
-**65+ cohort (sensitivity), n = 5,832, prevalence = 40.1%:** the same direction and approximate magnitude holds for the two dominant effects — smoking (aOR 1.84, p < 0.001) and diabetes (aOR 1.35, p < 0.001) — while eGFR remains non-significant (p = 0.90). Full side-by-side coefficients: `diagrams/forest_plot/cross_cohort_forest_plot.png`.
+**Limitation — complete-case selection bias:** the complete-case restriction is **outcome-related** in prior runs (retained vs. excluded rows differed on the target, driven mainly by uneven dietary-recall coverage across survey waves). This is now checked in each notebook's §9.14 (part 2, SMD of included vs. excluded rows) for the SHAP-informed model specifically; re-run to get current figures.
 
-**VIF check (50+ cohort):** all 23 terms < 5 (max 4.34, `occp_7`) — no problematic multicollinearity despite eGFR–age correlation (r ≈ −0.51).
-
-**Limitation — complete-case selection bias:** the complete-case restriction is **outcome-related** (retained vs. excluded rows differ on the target by SMD = −0.30, driven mainly by uneven dietary-recall coverage across survey waves). This is flagged explicitly in each notebook's §11.3.3 sensitivity check; the aORs above should be read with that caveat rather than as unconditionally population-representative.
+Full side-by-side SHAP-informed-model coefficients across cohorts, once regenerated: `diagrams/forest_plot/cross_cohort_forest_plot.png` (union of both cohorts' top-15 SHAP-selected variables — see [Cross-Cohort Diagrams](#cross-cohort-diagrams)).
 
 ---
 
@@ -229,7 +207,7 @@ Age is entered as a restricted cubic spline (4 knots); a design-based Wald test 
 
 | Folder | Script | Output | Shows |
 |---|---|---|---|
-| `forest_plot/` | `build_cross_cohort_forest_plot.py` | `cross_cohort_forest_plot.{pdf,png,tiff}` | Pre-specified aORs, 50+ vs 65+, dodged on shared rows |
+| `forest_plot/` | `build_cross_cohort_forest_plot.py` | `cross_cohort_forest_plot.{pdf,png,tiff}` | SHAP-informed-model aORs, 50+ vs 65+, union of both cohorts' top-15 SHAP-selected variables, dodged on shared rows (cohort-only rows show one marker) |
 | `shap_summary/` | `build_cross_cohort_shap_summary_overlay.py` | `cross_cohort_shap_summary_overlay.{pdf,png}` | SHAP beeswarm, best model per cohort, side by side |
 | `cross_cohort_overlay/` | `build_cross_cohort_overlay.py` | `cross_cohort_overlay.{pdf,png}` | ROC + PR + calibration curves, both cohorts overlaid |
 | `cross_cohort_split/` | `build_cross_cohort_split_3d.py` | `cross_cohort_split_3d.png` | Temporal train/test row counts, both cohorts |

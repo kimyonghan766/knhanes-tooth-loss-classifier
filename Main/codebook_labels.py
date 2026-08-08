@@ -21,7 +21,7 @@ _ENGINEERED = {
     "eGFR": "Estimated kidney function (eGFR, CKD-EPI)",
     "diabetes": "Diabetes (diagnosed or HbA1c ≥ 6.5%)",
     "brush_freq": "Daily brushing frequency (count)",
-    "hypertension": "Hypertension (diagnosed or BP threshold)",
+    "hypertension": "Hypertension: SBP ≥ 140 OR DBP ≥ 90 mmHg",
 }
 
 _CODE_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s+(.*)$")
