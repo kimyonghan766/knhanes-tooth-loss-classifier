@@ -187,9 +187,9 @@ def plot(results):
         ax.set_title(f'SHAP Summary — {r["model"]} ({r["label"]})', fontsize=12)
     fig.suptitle("Cross-cohort SHAP feature attribution — best model per age cohort", fontsize=13, y=1.02)
     plt.tight_layout()
-    fig.savefig(OUT_BASENAME + ".png", dpi=300, bbox_inches="tight")
+    fig.savefig(OUT_BASENAME + ".png", dpi=600, bbox_inches="tight")
     fig.savefig(OUT_BASENAME + ".pdf", bbox_inches="tight")
-    print(f"\nWrote {OUT_BASENAME}.png (300 dpi) and {OUT_BASENAME}.pdf")
+    print(f"\nWrote {OUT_BASENAME}.png (600 dpi) and {OUT_BASENAME}.pdf")
 
 
 if __name__ == "__main__":

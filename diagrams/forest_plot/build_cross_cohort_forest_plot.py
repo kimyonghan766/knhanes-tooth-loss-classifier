@@ -37,10 +37,11 @@ MAIN = os.path.join(HERE, "..", "..", "Main")   # repo-root Main/, two levels up
 sys.path.insert(0, MAIN)            # codebook_labels.py lives in Main/
 from codebook_labels import label_for
 
-# label, notebook file, plot colour (Okabe-Ito, CVD-safe), marker shape
+# label, notebook file, plot colour (blue/red -- validated CVD-safe pair, matches the
+# ROC/PR and calibration/DCA overlay figures), marker shape
 COHORTS = [
     ("50+", "final.ipynb",       "#0072B2", "o"),
-    ("65+", "final(65+).ipynb",  "#009E73", "s"),
+    ("65+", "final(65+).ipynb",  "#D62728", "s"),
 ]
 MM_PER_IN = 25.4
 FIG_WIDTH_MM = 190                  # Elsevier double-column width
@@ -243,11 +244,11 @@ def plot(cohort_data, cohort_data_lookup):
             color="#777777", style="italic")
 
     plt.tight_layout()
-    for ext, kw in ((".png", dict(dpi=300)),
+    for ext, kw in ((".png", dict(dpi=600)),
                     (".pdf", dict()),
                     (".tiff", dict(dpi=600, pil_kwargs={"compression": "tiff_lzw"}))):
         fig.savefig(OUT_BASENAME + ext, bbox_inches="tight", **kw)
-    print(f"\nWrote {OUT_BASENAME}.png (300 dpi preview), {OUT_BASENAME}.pdf (vector), "
+    print(f"\nWrote {OUT_BASENAME}.png (600 dpi), {OUT_BASENAME}.pdf (vector), "
           f"{OUT_BASENAME}.tiff (600 dpi, LZW) -- {n_vars} rows "
           f"({len(both)} shared, {len(only_a)} {label_a}-only, {len(only_b)} {label_b}-only)")
 
