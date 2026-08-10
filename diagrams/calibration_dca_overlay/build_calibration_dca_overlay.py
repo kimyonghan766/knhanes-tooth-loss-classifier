@@ -256,7 +256,7 @@ def plot(results):
     for r in results:
         ax_dca.plot(r["thresholds"], r["nb_best"], color=r["color"], linewidth=2.2, zorder=3,
                    label=f'{r["label"]} · {r["model"]} (recalibrated)')
-    y_min = min(r["nb_best"].min() for r in results) - 0.03
+    y_min = min(0, min(r["nb_best"].min() for r in results)) - 0.03
     y_max = max(r["nb_best"].max() for r in results) + 0.03
     ax_dca.set_xlim(DCA_THRESHOLDS[0], DCA_THRESHOLDS[-1])
     ax_dca.set_ylim(y_min, y_max)

@@ -97,7 +97,7 @@ def parse_shap_table(nbfile):
     return rows, n_complete, prevalence, top_n
 
 
-def plot(cohort_data, cohort_data_lookup):
+def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
     (label_a, _, color_a, marker_a), (label_b, _, color_b, marker_b) = cohort_data
     rows_a, n_a, prev_a, topn_a = cohort_data_lookup[label_a]
     rows_b, n_b, prev_b, topn_b = cohort_data_lookup[label_b]
@@ -171,10 +171,33 @@ def plot(cohort_data, cohort_data_lookup):
 
     ax.axvline(1.0, color="#888888", linewidth=1.0, linestyle=(0, (4, 3)), zorder=1)
 
-    # ── Data-driven x-limits (old fixed 0.55-2.6 range was tuned for the
-    # pre-specified covariate set; the SHAP-selected set differs per run) ──
-    all_los = [r["lo"] for rows in (rows_a, rows_b) for r in rows.values()]
-    all_his = [r["hi"] for rows in (rows_a, rows_b) for r in rows.values()]
+    # ── Outlier detection (Tukey "far out" fence on log aOR) ─────────────────
+    # A row whose point estimate sits far outside the bulk of the other effect
+    # sizes (BM1_0 / "Brushed teeth yesterday" in the 65+ cohort: aOR 0.08 vs.
+    # everything else in roughly 0.6-2.4) forces the shared log-scale axis wide
+    # enough to squash every other row's CI into a sliver near x=1. Flag those
+    # rows and keep them OUT of the x-limit calculation, rendering them per
+    # `mode` instead of a normal marker. Tukey's standard *inner* fence
+    # (1.5*IQR) is too sensitive with only ~30 points here -- it also caught
+    # OR1/"Self-rated oral health" (aOR 2.16), a genuinely large but perfectly
+    # normal effect, not a scale-breaking one. The *outer* "far out" fence
+    # (3*IQR) isolates just the true outlier and leaves real large effects on
+    # the shared axis where they belong.
+    all_points = [(label, varname, r)
+                  for label, rows in ((label_a, rows_a), (label_b, rows_b))
+                  for varname, r in rows.items()]
+    log_aors = np.array([np.log(r["aOR"]) for _, _, r in all_points])
+    q1, q3 = np.percentile(log_aors, [25, 75])
+    iqr = q3 - q1
+    fence_lo, fence_hi = q1 - 3.0 * iqr, q3 + 3.0 * iqr
+    outliers = {(label, varname) for label, varname, r in all_points
+                if not (fence_lo <= np.log(r["aOR"]) <= fence_hi)}
+
+    # ── Data-driven x-limits from the non-outlier rows only (old fixed
+    # 0.55-2.6 range was tuned for the pre-specified covariate set; the
+    # SHAP-selected set differs per run) ──
+    all_los = [r["lo"] for label, varname, r in all_points if (label, varname) not in outliers]
+    all_his = [r["hi"] for label, varname, r in all_points if (label, varname) not in outliers]
     log_lo, log_hi = np.log(min(all_los)), np.log(max(all_his))
     pad = max(0.08 * (log_hi - log_lo), 0.05)
     xlim = (np.exp(log_lo - pad), np.exp(log_hi + pad))
@@ -188,6 +211,24 @@ def plot(cohort_data, cohort_data_lookup):
             r = rows[varname]
             y = var_y[varname] + offset
             significant = r["p"] < 0.05
+
+            if (label, varname) in outliers:
+                edge = xlim[0] if r["aOR"] < xlim[0] else xlim[1]
+                txt_x, ha = (edge * 1.06, "left") if edge == xlim[0] else (edge * 0.94, "right")
+                label_txt = f"{r['aOR']:.2f} ({r['lo']:.2f}–{r['hi']:.2f})"
+                if mode == "clip":
+                    arrow_marker = "<" if edge == xlim[0] else ">"
+                    ax.plot(edge, y, marker=arrow_marker, color=color, markersize=5.0,
+                            markerfacecolor=color if significant else "white",
+                            markeredgecolor=color, markeredgewidth=0.8,
+                            clip_on=False, zorder=3)
+                    ax.text(txt_x, y, label_txt, fontsize=5.2, va="center", ha=ha,
+                            color=color, style="italic")
+                else:  # mode == "annotate": no marker/whisker on the shared axis at all
+                    ax.text(txt_x, y, f"{label}: aOR {label_txt} — off shared scale",
+                            fontsize=5.2, va="center", ha=ha, color=color, style="italic")
+                continue
+
             xerr = [[r["aOR"] - r["lo"]], [r["hi"] - r["aOR"]]]
             ax.errorbar(r["aOR"], y, xerr=xerr, fmt=marker, color=color,
                        markersize=4.0, markerfacecolor=color if significant else "white",
@@ -235,21 +276,29 @@ def plot(cohort_data, cohort_data_lookup):
               markersize=4.5, markerfacecolor="white", markeredgewidth=0.8,
               label="Open = not significant"),
     ]
-    leg = ax.legend(handles=legend_elems, loc="upper right", frameon=True, framealpha=0.92,
-                    fontsize=6, handlelength=1.5, borderpad=0.6)
+    # Legend moved OFF the data area (was "upper right" inside the axes, which sat
+    # directly on top of the right-hand whiskers of the top rows -- e.g. "Self-rated
+    # oral health" / "Current smoking rate indicator" -- whenever their CIs reached
+    # into the plot's upper-right corner). A figure-level legend below the x-axis
+    # can never collide with a data row, regardless of which rows have the widest CIs.
+    plt.tight_layout(rect=[0, 0.12, 1, 1])
+    leg = fig.legend(handles=legend_elems, loc="lower center", bbox_to_anchor=(0.5, 0.055),
+                     ncol=2, frameon=True, framealpha=0.92,
+                     fontsize=6, handlelength=1.5, borderpad=0.6, columnspacing=1.2)
     leg.get_frame().set_linewidth(0.5)
-    ax.text(0.99, 0.02,
-            "One marker per row = selected into only that cohort's SHAP-informed model",
-            transform=ax.transAxes, ha="right", va="bottom", fontsize=5.5,
-            color="#777777", style="italic")
+    footnote = "One marker per row = selected into only that cohort's SHAP-informed model"
+    if mode == "clip":
+        footnote += "  |  arrow markers = point estimate off the shared axis, exact aOR (95% CI) printed alongside"
+    fig.text(0.5, 0.01, footnote, ha="center", va="bottom", fontsize=5.5,
+             color="#777777", style="italic")
 
-    plt.tight_layout()
+    out_base = OUT_BASENAME + out_suffix
     for ext, kw in ((".png", dict(dpi=600)),
                     (".pdf", dict()),
                     (".tiff", dict(dpi=600, pil_kwargs={"compression": "tiff_lzw"}))):
-        fig.savefig(OUT_BASENAME + ext, bbox_inches="tight", **kw)
-    print(f"\nWrote {OUT_BASENAME}.png (600 dpi), {OUT_BASENAME}.pdf (vector), "
-          f"{OUT_BASENAME}.tiff (600 dpi, LZW) -- {n_vars} rows "
+        fig.savefig(out_base + ext, bbox_inches="tight", **kw)
+    print(f"\nWrote {out_base}.png (600 dpi), {out_base}.pdf (vector), "
+          f"{out_base}.tiff (600 dpi, LZW) -- {n_vars} rows "
           f"({len(both)} shared, {len(only_a)} {label_a}-only, {len(only_b)} {label_b}-only)")
 
 
@@ -260,4 +309,11 @@ if __name__ == "__main__":
         cohort_data_lookup[label] = (rows, n_complete, prevalence, top_n)
         print(f"[{label}] parsed {len(rows)} rows from {nbfile}  "
               f"(n_complete={n_complete}, prevalence={prevalence:.1f}%, TOP_N_SHAP={top_n})")
-    plot(COHORTS, cohort_data_lookup)
+    # Two outlier-handling variants for review (which one ends up in the paper is
+    # still an open call -- see the module docstring's cross-cohort note above):
+    #   "clip"     -- truncate the outlier's whisker at the axis edge with an
+    #                 arrow marker + exact aOR (95% CI) printed as text.
+    #   "annotate" -- drop the outlier's marker/whisker entirely; report its
+    #                 aOR (95% CI) as a text-only callout on its row.
+    for mode, suffix in (("clip", "_clipped"), ("annotate", "_annotated")):
+        plot(COHORTS, cohort_data_lookup, mode, suffix)

@@ -33,6 +33,8 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+from matplotlib.legend_handler import HandlerBase
 
 from sklearn.pipeline import Pipeline
 from sklearn.linear_model import LogisticRegression
@@ -187,9 +189,30 @@ def run_cohort(label, nbfile, color):
                 rec_grid=rec_grid, prec_mean=prec_mean, prec_std=prec_std)
 
 
+class _SplitBandHandler(HandlerBase):
+    """Legend handler for the shared '± 1 s.d.' entry: draws a borderless patch,
+    left half in `left_color` (50+), right half in `right_color` (65+), both at
+    the same alpha as the plotted fill_between bands -- since both cohorts share
+    this one legend row, the swatch itself carries the per-cohort colour split."""
+    def __init__(self, left_color, right_color, alpha):
+        super().__init__()
+        self.left_color = left_color
+        self.right_color = right_color
+        self.alpha = alpha
+
+    def create_artists(self, legend, orig_handle, xdescent, ydescent, width, height, fontsize, trans):
+        left = Rectangle((-xdescent, -ydescent), width / 2, height,
+                         facecolor=self.left_color, alpha=self.alpha, linewidth=0, transform=trans)
+        right = Rectangle((-xdescent + width / 2, -ydescent), width / 2, height,
+                          facecolor=self.right_color, alpha=self.alpha, linewidth=0, transform=trans)
+        return [left, right]
+
+
 def plot(results):
     plt.rcParams.update({"font.size": 11, "axes.edgecolor": "#888888"})
     fig, (ax_roc, ax_pr) = plt.subplots(1, 2, figsize=(15.5, 6.4))
+    blue_color = next(r["color"] for r in results if r["label"] == "50+")
+    red_color = next(r["color"] for r in results if r["label"] == "65+")
 
     # ── Left panel: ROC overlay ─────────────────────────────────────────────
     ax_roc.grid(True, color="#000000", alpha=0.08, linewidth=0.8)
@@ -208,7 +231,13 @@ def plot(results):
     ax_roc.set_xlabel("False Positive Rate")
     ax_roc.set_ylabel("True Positive Rate")
     ax_roc.set_title("Receiver Operating Characteristic", fontsize=12, loc="left")
-    ax_roc.legend(loc="lower right", frameon=True, framealpha=0.9, fontsize=9.5)
+    # shared "± 1 s.d." entry: a proxy handle rendered by _SplitBandHandler as a blue/red split patch
+    roc_handles, roc_labels = ax_roc.get_legend_handles_labels()
+    roc_sd_proxy = Rectangle((0, 0), 1, 1)
+    roc_handles.append(roc_sd_proxy)
+    roc_labels.append("± 1 s.d.")
+    ax_roc.legend(roc_handles, roc_labels, handler_map={roc_sd_proxy: _SplitBandHandler(blue_color, red_color, 0.15)},
+                 loc="lower right", frameon=True, framealpha=0.9, fontsize=9.5)
     for s in ("top", "right"):
         ax_roc.spines[s].set_visible(False)
 
@@ -232,7 +261,13 @@ def plot(results):
     ax_pr.set_xlabel("Recall  (of tooth-loss cases, <20 teeth)")
     ax_pr.set_ylabel("Precision")
     ax_pr.set_title("Precision–Recall", fontsize=12, loc="left")
-    ax_pr.legend(loc="upper right", frameon=True, framealpha=0.9, fontsize=9.5)
+    # shared "± 1 s.d." entry: a proxy handle rendered by _SplitBandHandler as a blue/red split patch
+    pr_handles, pr_labels = ax_pr.get_legend_handles_labels()
+    pr_sd_proxy = Rectangle((0, 0), 1, 1)
+    pr_handles.append(pr_sd_proxy)
+    pr_labels.append("± 1 s.d.")
+    ax_pr.legend(pr_handles, pr_labels, handler_map={pr_sd_proxy: _SplitBandHandler(blue_color, red_color, 0.15)},
+                loc="upper right", frameon=True, framealpha=0.9, fontsize=9.5)
     for s in ("top", "right"):
         ax_pr.spines[s].set_visible(False)
 
