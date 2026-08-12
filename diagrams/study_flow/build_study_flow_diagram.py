@@ -134,13 +134,13 @@ ML_LEAF_B_TEXT = "B\nDev n = 5,946\nEval n = 1,758"
 INF_LEAF_A_TEXT = "A\nn = 14,871"
 INF_LEAF_B_TEXT = "B\nn = 7,704"
 
-# ── Font sizes (unchanged from the previous version) ─────────────────────────
-FS_MAIN = 9.5
-FS_S1 = 8.3
-FS_S2 = FS_S3 = 8.6
-FS_M4 = 8.6
-FS_ARM = 9
-FS_LEAF = 8.8
+# ── Font sizes ─────────────────────────────────────────────────────────────
+FS_MAIN = 12
+FS_S1 = 10.5
+FS_S2 = FS_S3 = 10.8
+FS_M4 = 10.8
+FS_ARM = 11.3
+FS_LEAF = 11
 
 # ── Vertical layout: a running cursor, box heights computed from their own
 # text, main boxes stacked with a fixed connector gap, side boxes centred on
