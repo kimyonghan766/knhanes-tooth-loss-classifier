@@ -1,20 +1,21 @@
 """
-Study Flow Diagram — Sample & Variable Attrition (both cohorts)
+Study Flow Diagram — Participant Attrition (both cohorts)
 =============================================================================
-Box-and-connector flow diagram tracking BOTH forms of attrition through the
-pipeline described in Main/final.ipynb (cohort A, age >= 50) and
+Box-and-connector flow diagram tracking participant (respondent) attrition
+through the pipeline described in Main/final.ipynb (cohort A, age >= 50) and
 Main/final(65+).ipynb (cohort B, age >= 65):
 
-  - ROW attrition (respondents): age-eligibility filter -> missing/invalid
-    target (O_TC) exclusion -> analytic cohort.
-  - COLUMN attrition (candidate predictors): the 9 variables excluded before
-    modelling (5 by the computed NaN% > 30 missingness rule, 4 by a priori
-    conceptual/definitional-overlap reasoning -- see notebook cell 6 and the
-    §4.1.1 computed screen in cell 20, whose printed verdict table confirms
-    all 9 and finds no further exclusions among the 57 retained variables).
+  - Age-eligibility filter -> missing/invalid target (O_TC) exclusion ->
+    analytic cohort.
 
-After "Data preparation" the diagram BRANCHES into the two analysis arms,
-because they draw on different samples:
+Candidate-predictor (variable) attrition is a separate process -- the 9
+variables excluded before modelling (5 by the computed NaN% > 30 missingness
+rule, 4 by a priori conceptual/definitional-overlap reasoning; see notebook
+cell 6 and the §4.1.1 computed screen in cell 20) -- and is intentionally
+NOT shown here, since it describes predictors, not participants.
+
+After the analytic cohort is established, the diagram BRANCHES into the two
+analysis arms, because they draw on different samples:
   - ML (predictive) arm  -> temporal Development/Evaluation split (notebook
     §6 onward; feature_cols).
   - Inferential (confirmatory) arm -> full pooled cohort, survey-weighted
@@ -93,15 +94,7 @@ def connect_main(ax, y_top, y_bottom):
 
 # ── Box text (unchanged from the previous version) ───────────────────────────
 M1_TEXT = ("KNHANES 2020–2024 (pooled), 5 waves\n"
-           "N = 34,640 respondents assessed\n"
-           "Candidate variables: 66 assessed → 57 retained")
-S1_TEXT = ("Variables excluded (n = 9)\n"
-           "• Missingness, NaN > 30% (n=5):\n"
-           "  DI4_dg, DE1_4, BS3_1,\n"
-           "  BD2_1, LW_ms\n"
-           "• Redundancy / definitional\n"
-           "  overlap, a priori (n=4):\n"
-           "  HE_obe, HE_wc, HE_glu, N_EN")
+           "N = 34,640 respondents assessed")
 M2_TEXT = ("Age-eligibility filter\n"
            "A (≥50): n = 17,545\n"
            "B (≥65): n = 9,003")
@@ -114,13 +107,6 @@ M3_TEXT = ("Missing/invalid target (O_TC) excluded\n"
 S3_TEXT = ("Excluded, missing/invalid O_TC\n"
            "A: excl. 2,674\n"
            "B: excl. 1,299")
-M4_TEXT = ("Data preparation\n"
-           "• Missingness/collinearity screen (VIF): confirms\n"
-           "  the 9 a priori exclusions above; 0 further\n"
-           "  variables dropped from the 57 retained\n"
-           "• Derive eGFR, diabetes, hypertension, brush_freq\n"
-           "• Missing predictor values imputed (mode/median,\n"
-           "  fit on development set only)")
 ML_TEXT = ("ML (predictive) arm\n"
            "Temporal split:\n"
            "Development (2020–2023) vs.\n"
@@ -136,9 +122,7 @@ INF_LEAF_B_TEXT = "B\nn = 7,704"
 
 # ── Font sizes ─────────────────────────────────────────────────────────────
 FS_MAIN = 12
-FS_S1 = 10.5
 FS_S2 = FS_S3 = 10.8
-FS_M4 = 10.8
 FS_ARM = 11.3
 FS_LEAF = 11
 
@@ -149,9 +133,6 @@ y = TOP_MARGIN
 
 M1_Y0 = y
 M1_Y1 = M1_Y0 + box_h(M1_TEXT, FS_MAIN)
-J1 = M1_Y1 + MAIN_GAP / 2
-h_s1 = box_h(S1_TEXT, FS_S1)
-S1_Y0, S1_Y1 = J1 - h_s1 / 2, J1 + h_s1 / 2
 
 M2_Y0 = M1_Y1 + MAIN_GAP
 M2_Y1 = M2_Y0 + box_h(M2_TEXT, FS_MAIN)
@@ -165,10 +146,7 @@ J3 = M3_Y1 + MAIN_GAP / 2
 h_s3 = box_h(S3_TEXT, FS_S3)
 S3_Y0, S3_Y1 = J3 - h_s3 / 2, J3 + h_s3 / 2
 
-M4_Y0 = M3_Y1 + MAIN_GAP
-M4_Y1 = M4_Y0 + box_h(M4_TEXT, FS_M4)
-
-BRANCH_Y = M4_Y1 + BRANCH_GAP
+BRANCH_Y = M3_Y1 + MAIN_GAP + BRANCH_GAP
 
 ARM_Y0 = BRANCH_Y + BRANCH_GAP
 ARM_Y1 = ARM_Y0 + max(box_h(ML_TEXT, FS_ARM), box_h(INF_TEXT, FS_ARM))
@@ -188,11 +166,9 @@ ax.set_ylim(*YLIM)
 ax.invert_yaxis()
 ax.axis("off")
 
-# ── M1: source population + candidate variables ─────────────────────────────
+# ── M1: source population ────────────────────────────────────────────────────
 draw_box(ax, MAIN_X0, MAIN_X1, M1_Y0, M1_Y1, M1_TEXT, fontsize=FS_MAIN)
 connect_main(ax, M1_Y1, M2_Y0)
-draw_box(ax, SIDE_X0, SIDE_X1, S1_Y0, S1_Y1, S1_TEXT, fontsize=FS_S1)
-branch_to_side(ax, MAIN_XC, J1, SIDE_X0)
 
 # ── M2: age-eligibility filter ───────────────────────────────────────────────
 draw_box(ax, MAIN_X0, MAIN_X1, M2_Y0, M2_Y1, M2_TEXT, fontsize=FS_MAIN)
@@ -202,15 +178,11 @@ branch_to_side(ax, MAIN_XC, J2, SIDE_X0)
 
 # ── M3: missing/invalid target excluded -> analytic cohort ─────────────────
 draw_box(ax, MAIN_X0, MAIN_X1, M3_Y0, M3_Y1, M3_TEXT, fontsize=FS_MAIN)
-connect_main(ax, M3_Y1, M4_Y0)
 draw_box(ax, SIDE_X0, SIDE_X1, S3_Y0, S3_Y1, S3_TEXT, fontsize=FS_S3)
 branch_to_side(ax, MAIN_XC, J3, SIDE_X0)
 
-# ── M4: data preparation ─────────────────────────────────────────────────────
-draw_box(ax, MAIN_X0, MAIN_X1, M4_Y0, M4_Y1, M4_TEXT, fontsize=FS_M4)
-
 # ── Branch into ML vs. Inferential arms ──────────────────────────────────────
-connect_main(ax, M4_Y1, BRANCH_Y)
+connect_main(ax, M3_Y1, BRANCH_Y)
 
 ML_XC, INF_XC = 22, 76
 hline(ax, BRANCH_Y, ML_XC, INF_XC)
