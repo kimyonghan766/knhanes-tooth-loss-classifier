@@ -10,10 +10,19 @@ per cohort). Both panels reuse the notebooks' own algorithms verbatim
   - Calibration: out-of-fold (OOF) train-set probabilities for ALL 5 tuned
     models -> unpenalised Platt scaling (logistic regression on the logit of
     the OOF probabilities, C=inf) -> apply to the TEST set -> 10-bin
-    calibration_curve on the best model's recalibrated probabilities.
+    calibration_curve on the best model's recalibrated probabilities. A 95%
+    CI band is added around this by bootstrapping the FIXED (y_test,
+    recalibrated proba) pairs 2000 times (prevalence-preserving, seed 42 --
+    same recipe and draw count as the notebooks' own bootstrap-CI cell,
+    cell 56, and as build_roc_pr_overlay.py), recomputing calibration_curve
+    per draw, and interpolating each draw onto a common predicted-probability
+    grid; the plotted center line is the bootstrap mean curve (not the
+    single-fit curve) and the band is the 2.5th-97.5th percentile across
+    draws.
   - DCA: net benefit of the best model's recalibrated probabilities across
     thresholds 0.01-0.50 (dcurves), alongside "Treat all" (differs by
-    cohort prevalence) and "Treat none" (0 for both) reference lines.
+    cohort prevalence) and "Treat none" (0 for both) reference lines. No
+    bootstrap band on this panel.
 
 Why a separate script (not a notebook cell): each notebook only computes
 its own cohort's OOF probabilities / Platt scaling / DCA. Re-running the
@@ -39,6 +48,8 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+from matplotlib.legend_handler import HandlerBase
 
 from sklearn.pipeline import Pipeline
 from sklearn.linear_model import LogisticRegression
@@ -64,6 +75,9 @@ DATA_CELL = 47                      # cell that defines X_train/X_test/y_train/y
                                      # make_imputer, make_scaler, SCALE_POS_WEIGHT and `cv`
 N_BINS = 10                         # matches the notebooks' calibration_curve(..., n_bins=10, strategy='uniform')
 DCA_THRESHOLDS = np.arange(0.01, 0.51, 0.01)   # matches notebook cell 84's dca_thresholds
+N_BOOT_DRAW = 2000                  # bootstrap draws for the calibration curve's 95% CI band
+                                     # (matches the notebooks' own bootstrap-CI convention, cell 56)
+GRID_N = 200                        # points on the common predicted-probability grid for the CI band
 OUT_PNG = os.path.join(HERE, "calibration_dca_overlay.png")
 OUT_PDF = os.path.join(HERE, "calibration_dca_overlay.pdf")
 PNG_DPI = 600                       # Elsevier-grade combination art
@@ -148,6 +162,19 @@ def _logit(p, eps=1e-6):
     return np.log(p / (1 - p))
 
 
+def stratified_boot_indices(y, n_draws, seed=42):
+    """Prevalence-preserving bootstrap of row indices -- same recipe as the
+    notebooks' _boot_idx (cell 56) and build_roc_pr_overlay.py: resample the
+    outcome-0 and outcome-1 rows separately (with replacement) so every draw
+    keeps the same class balance."""
+    rng = np.random.default_rng(seed)
+    idx0 = np.where(y == 0)[0]
+    idx1 = np.where(y == 1)[0]
+    return [np.concatenate([rng.choice(idx0, idx0.size, replace=True),
+                            rng.choice(idx1, idx1.size, replace=True)])
+            for _ in range(n_draws)]
+
+
 def run_cohort(label, nbfile, color):
     nb = json.load(open(nbfile))
     reported_best_name, reported_ap, reported_auc, params_by_model = recover_best_and_all_params(nb)
@@ -201,10 +228,25 @@ def run_cohort(label, nbfile, color):
         recal_proba_by_model[name] = recalibrator.predict_proba(_logit(proba_raw).reshape(-1, 1))[:, 1]
 
     proba_best_recal = recal_proba_by_model[best_name]
-    prob_true_recal, prob_pred_recal = calibration_curve(y_test, proba_best_recal, n_bins=N_BINS, strategy="uniform")
+    y_test_arr = y_test.to_numpy()
+
+    # ── Bootstrap the FIXED (y_test, recalibrated proba) pairs for a 95% CI band ──
+    # No refitting/re-recalibrating per draw -- same no-refit bootstrap idiom as
+    # build_roc_pr_overlay.py. Each draw's calibration_curve is interpolated onto a
+    # common predicted-probability grid; the plotted center line is the bootstrap
+    # mean, the band is the 2.5th-97.5th percentile across the N_BOOT_DRAW draws.
+    boot_idx = stratified_boot_indices(y_test_arr, N_BOOT_DRAW)
+    prob_grid = np.linspace(0, 1, GRID_N)
+    true_interp_all = []
+    for bi in boot_idx:
+        yb, pb = y_test_arr[bi], proba_best_recal[bi]
+        prob_true_b, prob_pred_b = calibration_curve(yb, pb, n_bins=N_BINS, strategy="uniform")
+        true_interp_all.append(np.interp(prob_grid, prob_pred_b, prob_true_b))
+    true_interp_all = np.array(true_interp_all)
+    prob_true_mean = true_interp_all.mean(axis=0)
+    prob_true_lo, prob_true_hi = np.percentile(true_interp_all, [2.5, 97.5], axis=0)
 
     # ── Reproduce cells 84-85: DCA on the recalibrated probabilities, all 5 models ──
-    y_test_arr = y_test.to_numpy()
     dca_data = pd.DataFrame({"O_TC_": y_test_arr})
     model_names = list(fitted_models.keys())
     for name in model_names:
@@ -216,15 +258,38 @@ def run_cohort(label, nbfile, color):
     nb_none = dca_table["none"].to_numpy()
 
     print(f"[{label}] {best_name}: AUPRC {ap:.4f} (reported {reported_ap:.4f})  "
-          f"AUC {auc:.4f} (reported {reported_auc:.4f})  n_test {len(y_test)}")
+          f"AUC {auc:.4f} (reported {reported_auc:.4f})  n_test {len(y_test)}  "
+          f"n_boot {N_BOOT_DRAW}")
     return dict(label=label, model=best_name, color=color,
-                prob_true=prob_true_recal, prob_pred=prob_pred_recal,
+                prob_grid=prob_grid, prob_true_mean=prob_true_mean,
+                prob_true_lo=prob_true_lo, prob_true_hi=prob_true_hi,
                 thresholds=dca_table.index.to_numpy(), nb_best=nb_best, nb_all=nb_all, nb_none=nb_none)
+
+
+class _SplitBandHandler(HandlerBase):
+    """Legend handler for the shared '95% CI' entry: draws a borderless patch,
+    left half in `left_color` (50+), right half in `right_color` (65+), both at
+    the same alpha as the plotted fill_between bands -- since both cohorts share
+    this one legend row, the swatch itself carries the per-cohort colour split."""
+    def __init__(self, left_color, right_color, alpha):
+        super().__init__()
+        self.left_color = left_color
+        self.right_color = right_color
+        self.alpha = alpha
+
+    def create_artists(self, legend, orig_handle, xdescent, ydescent, width, height, fontsize, trans):
+        left = Rectangle((-xdescent, -ydescent), width / 2, height,
+                         facecolor=self.left_color, alpha=self.alpha, linewidth=0, transform=trans)
+        right = Rectangle((-xdescent + width / 2, -ydescent), width / 2, height,
+                          facecolor=self.right_color, alpha=self.alpha, linewidth=0, transform=trans)
+        return [left, right]
 
 
 def plot(results):
     plt.rcParams.update({"font.size": 11, "axes.edgecolor": "#888888"})
     fig, (ax_cal, ax_dca) = plt.subplots(1, 2, figsize=(15.5, 6.4))
+    blue_color = next(r["color"] for r in results if r["label"] == "50+")
+    red_color = next(r["color"] for r in results if r["label"] == "65+")
 
     # ── Left panel: Calibration overlay (Platt-recalibrated, best model per cohort) ──
     ax_cal.grid(True, color="#000000", alpha=0.08, linewidth=0.8)
@@ -232,15 +297,22 @@ def plot(results):
     ax_cal.plot([0, 1], [0, 1], color="#888888", linewidth=1.3,
                linestyle=(0, (5, 4)), alpha=0.8, zorder=2, label="Perfectly calibrated")
     for r in results:
-        ax_cal.plot(r["prob_pred"], r["prob_true"], color=r["color"], linewidth=2.2,
-                   marker="o", markersize=5.5, markeredgecolor="white", markeredgewidth=0.7,
-                   zorder=3, label=f'{r["label"]} · {r["model"]} (Platt-recalibrated)')
+        ax_cal.plot(r["prob_grid"], r["prob_true_mean"], color=r["color"], linewidth=2.2,
+                   zorder=3, label=f'{r["label"]} · {r["model"]} (Platt-recalibrated, bootstrap mean)')
+        ax_cal.fill_between(r["prob_grid"], r["prob_true_lo"], r["prob_true_hi"],
+                            color=r["color"], alpha=0.15, zorder=1.5, linewidth=0)
     ax_cal.set_xlim(0, 1.0)
     ax_cal.set_ylim(0, 1.02)
     ax_cal.set_xlabel("Mean predicted probability")
     ax_cal.set_ylabel("Observed frequency")
     ax_cal.set_title("Calibration (Platt-recalibrated)", fontsize=12, loc="left")
-    ax_cal.legend(loc="upper left", frameon=True, framealpha=0.9, fontsize=9.5)
+    # shared "95% CI" entry: a proxy handle rendered by _SplitBandHandler as a blue/red split patch
+    cal_handles, cal_labels = ax_cal.get_legend_handles_labels()
+    cal_ci_proxy = Rectangle((0, 0), 1, 1)
+    cal_handles.append(cal_ci_proxy)
+    cal_labels.append("95% CI")
+    ax_cal.legend(cal_handles, cal_labels, handler_map={cal_ci_proxy: _SplitBandHandler(blue_color, red_color, 0.15)},
+                 loc="upper left", frameon=True, framealpha=0.9, fontsize=9.5)
     for s in ("top", "right"):
         ax_cal.spines[s].set_visible(False)
 
@@ -267,7 +339,8 @@ def plot(results):
     for s in ("top", "right"):
         ax_dca.spines[s].set_visible(False)
 
-    fig.suptitle("Cross-cohort calibration & decision-curve analysis — best model per age cohort (2024 test set)",
+    fig.suptitle(f"Cross-cohort calibration & decision-curve analysis — best model per age cohort (2024 test set); "
+                 f"calibration band is {N_BOOT_DRAW} bootstrap resamples (mean, 95% CI)",
                  fontsize=12.5, x=0.01, ha="left")
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(OUT_PNG, dpi=PNG_DPI, bbox_inches="tight")

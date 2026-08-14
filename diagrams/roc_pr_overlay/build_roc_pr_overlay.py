@@ -4,11 +4,14 @@ Cross-Cohort ROC + PR Bootstrap Overlay (50+ vs 65+)
 Single figure, two panels: ROC (left), Precision-Recall (right), each
 showing BOTH age cohorts on the same axes -- 50+ in blue, 65+ in red.
 
-Per cohort: 10 stratified bootstrap resamples of that cohort's 2024 test
-set (prevalence-preserving, seed 42, same recipe as the notebooks' own
-_boot_idx in cell 56) are drawn as thin translucent lines in the cohort's
-colour, the mean curve (interpolated onto a common grid) as a bold line,
-and +/- 1 std. dev. across the 10 draws as a shaded band. The chance/
+Per cohort: 2000 stratified bootstrap resamples of that cohort's 2024 test
+set (prevalence-preserving, seed 42, same recipe -- and same draw count --
+as the notebooks' own bootstrap-CI cell, cell 56) drive a percentile-based
+95% CI band (2.5th-97.5th percentile across all 2000 draws, interpolated
+onto a common grid) as a shaded region, with the mean curve as a bold line.
+A subsample of 15 of the 2000 draws are additionally drawn as thin
+translucent lines in the cohort's colour, purely for visual texture -- the
+CI band itself is computed from the full 2000. The chance/
 random-guessing reference (diagonal for ROC, prevalence line for PR) is
 drawn in neutral gray -- red and blue are reserved for cohort identity,
 not for baseline-vs-model contrast as in a single-cohort figure.
@@ -56,8 +59,10 @@ COHORTS = [
 ]
 DATA_CELL = 47                      # cell that defines X_train/X_test/y_train/y_test/w_test_arr,
                                      # make_imputer, make_scaler and SCALE_POS_WEIGHT
-N_BOOT_DRAW = 10                    # bootstrap draws shown as individual lines + used for mean/std band
-GRID_N = 200                        # points on the common FPR / recall grid used for the mean/std band
+N_BOOT_DRAW = 2000                  # bootstrap draws used for the mean curve + 95% CI band
+                                     # (matches the notebooks' own bootstrap-CI convention, cell 56)
+DISPLAY_N_DRAW = 15                 # subsample of N_BOOT_DRAW plotted as individual spaghetti lines
+GRID_N = 200                        # points on the common FPR / recall grid used for the mean/CI band
 OUT_PNG = os.path.join(HERE, "roc_pr_overlay.png")
 OUT_PDF = os.path.join(HERE, "roc_pr_overlay.pdf")
 PNG_DPI = 600                       # Elsevier-grade combination art
@@ -162,22 +167,25 @@ def run_cohort(label, nbfile, color):
     boot_idx = stratified_boot_indices(y_test, N_BOOT_DRAW)
     fpr_grid = np.linspace(0, 1, GRID_N)
     rec_grid = np.linspace(0, 1, GRID_N)
-    roc_draws, pr_draws = [], []
+    roc_draws, pr_draws = [], []           # only the first DISPLAY_N_DRAW raw curves are kept, for plotting
     tpr_interp_all, prec_interp_all = [], []
-    for bi in boot_idx:
+    for i, bi in enumerate(boot_idx):
         yb, pb, wb = y_test[bi], proba[bi], w[bi]
         fpr_b, tpr_b, _ = roc_curve(yb, pb, sample_weight=wb)
         prec_b, rec_b, _ = precision_recall_curve(yb, pb, sample_weight=wb)
-        roc_draws.append((fpr_b, tpr_b))
-        pr_draws.append((rec_b, prec_b))
+        if i < DISPLAY_N_DRAW:
+            roc_draws.append((fpr_b, tpr_b))
+            pr_draws.append((rec_b, prec_b))
         tpr_interp_all.append(np.interp(fpr_grid, fpr_b, tpr_b))
         order = np.argsort(rec_b)
         prec_interp_all.append(np.interp(rec_grid, rec_b[order], prec_b[order]))
 
     tpr_interp_all = np.array(tpr_interp_all)
     prec_interp_all = np.array(prec_interp_all)
-    tpr_mean, tpr_std = tpr_interp_all.mean(axis=0), tpr_interp_all.std(axis=0)
-    prec_mean, prec_std = prec_interp_all.mean(axis=0), prec_interp_all.std(axis=0)
+    tpr_mean = tpr_interp_all.mean(axis=0)
+    prec_mean = prec_interp_all.mean(axis=0)
+    tpr_lo, tpr_hi = np.percentile(tpr_interp_all, [2.5, 97.5], axis=0)
+    prec_lo, prec_hi = np.percentile(prec_interp_all, [2.5, 97.5], axis=0)
 
     print(f"[{label}] {best_name}: AUPRC {ap:.4f} (reported {reported_ap:.4f})  "
           f"AUC {auc:.4f} (reported {reported_auc:.4f})  n_test {len(y_test)}  "
@@ -185,12 +193,12 @@ def run_cohort(label, nbfile, color):
     return dict(label=label, model=best_name, color=color, baseline=baseline,
                 ap=ap, auc=auc,
                 roc_draws=roc_draws, pr_draws=pr_draws,
-                fpr_grid=fpr_grid, tpr_mean=tpr_mean, tpr_std=tpr_std,
-                rec_grid=rec_grid, prec_mean=prec_mean, prec_std=prec_std)
+                fpr_grid=fpr_grid, tpr_mean=tpr_mean, tpr_lo=tpr_lo, tpr_hi=tpr_hi,
+                rec_grid=rec_grid, prec_mean=prec_mean, prec_lo=prec_lo, prec_hi=prec_hi)
 
 
 class _SplitBandHandler(HandlerBase):
-    """Legend handler for the shared '± 1 s.d.' entry: draws a borderless patch,
+    """Legend handler for the shared '95% CI' entry: draws a borderless patch,
     left half in `left_color` (50+), right half in `right_color` (65+), both at
     the same alpha as the plotted fill_between bands -- since both cohorts share
     this one legend row, the swatch itself carries the per-cohort colour split."""
@@ -224,19 +232,19 @@ def plot(results):
             ax_roc.plot(fpr_b, tpr_b, color=r["color"], linewidth=0.7, alpha=0.30, zorder=2.5)
         ax_roc.plot(r["fpr_grid"], r["tpr_mean"], color=r["color"], linewidth=2.4, zorder=3,
                    label=f'{r["label"]} · {r["model"]}  (AUC {r["auc"]:.3f})')
-        ax_roc.fill_between(r["fpr_grid"], r["tpr_mean"] - r["tpr_std"], r["tpr_mean"] + r["tpr_std"],
+        ax_roc.fill_between(r["fpr_grid"], r["tpr_lo"], r["tpr_hi"],
                             color=r["color"], alpha=0.15, zorder=1.5, linewidth=0)
     ax_roc.set_xlim(0, 1.0)
     ax_roc.set_ylim(0, 1.02)
     ax_roc.set_xlabel("False Positive Rate")
     ax_roc.set_ylabel("True Positive Rate")
     ax_roc.set_title("Receiver Operating Characteristic", fontsize=12, loc="left")
-    # shared "± 1 s.d." entry: a proxy handle rendered by _SplitBandHandler as a blue/red split patch
+    # shared "95% CI" entry: a proxy handle rendered by _SplitBandHandler as a blue/red split patch
     roc_handles, roc_labels = ax_roc.get_legend_handles_labels()
-    roc_sd_proxy = Rectangle((0, 0), 1, 1)
-    roc_handles.append(roc_sd_proxy)
-    roc_labels.append("± 1 s.d.")
-    ax_roc.legend(roc_handles, roc_labels, handler_map={roc_sd_proxy: _SplitBandHandler(blue_color, red_color, 0.15)},
+    roc_ci_proxy = Rectangle((0, 0), 1, 1)
+    roc_handles.append(roc_ci_proxy)
+    roc_labels.append("95% CI")
+    ax_roc.legend(roc_handles, roc_labels, handler_map={roc_ci_proxy: _SplitBandHandler(blue_color, red_color, 0.15)},
                  loc="lower right", frameon=True, framealpha=0.9, fontsize=9.5)
     for s in ("top", "right"):
         ax_roc.spines[s].set_visible(False)
@@ -252,7 +260,7 @@ def plot(results):
             ax_pr.plot(rec_b, prec_b, color=r["color"], linewidth=0.7, alpha=0.30, zorder=2.5)
         ax_pr.plot(r["rec_grid"], r["prec_mean"], color=r["color"], linewidth=2.4, zorder=3,
                    label=f'{r["label"]} · {r["model"]}  (AUPRC {r["ap"]:.3f})')
-        ax_pr.fill_between(r["rec_grid"], r["prec_mean"] - r["prec_std"], r["prec_mean"] + r["prec_std"],
+        ax_pr.fill_between(r["rec_grid"], r["prec_lo"], r["prec_hi"],
                            color=r["color"], alpha=0.15, zorder=1.5, linewidth=0)
     # one representative "Chance" legend entry for both (differently-valued) baselines
     ax_pr.plot([], [], color="#888888", linewidth=1.3, linestyle=(0, (5, 4)), alpha=0.8, label="Chance")
@@ -261,18 +269,18 @@ def plot(results):
     ax_pr.set_xlabel("Recall  (of tooth-loss cases, <20 teeth)")
     ax_pr.set_ylabel("Precision")
     ax_pr.set_title("Precision–Recall", fontsize=12, loc="left")
-    # shared "± 1 s.d." entry: a proxy handle rendered by _SplitBandHandler as a blue/red split patch
+    # shared "95% CI" entry: a proxy handle rendered by _SplitBandHandler as a blue/red split patch
     pr_handles, pr_labels = ax_pr.get_legend_handles_labels()
-    pr_sd_proxy = Rectangle((0, 0), 1, 1)
-    pr_handles.append(pr_sd_proxy)
-    pr_labels.append("± 1 s.d.")
-    ax_pr.legend(pr_handles, pr_labels, handler_map={pr_sd_proxy: _SplitBandHandler(blue_color, red_color, 0.15)},
+    pr_ci_proxy = Rectangle((0, 0), 1, 1)
+    pr_handles.append(pr_ci_proxy)
+    pr_labels.append("95% CI")
+    ax_pr.legend(pr_handles, pr_labels, handler_map={pr_ci_proxy: _SplitBandHandler(blue_color, red_color, 0.15)},
                 loc="upper right", frameon=True, framealpha=0.9, fontsize=9.5)
     for s in ("top", "right"):
         ax_pr.spines[s].set_visible(False)
 
     fig.suptitle(f"Cross-cohort AUROC & AUPRC — best model per age cohort, "
-                 f"{N_BOOT_DRAW} bootstrap resamples of the 2024 test set (mean ± 1 s.d.)",
+                 f"{N_BOOT_DRAW} bootstrap resamples of the 2024 test set (mean, 95% CI)",
                  fontsize=12.5, x=0.01, ha="left")
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(OUT_PNG, dpi=PNG_DPI, bbox_inches="tight")
