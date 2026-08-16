@@ -48,9 +48,6 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
-from matplotlib.legend_handler import HandlerBase
-
 from sklearn.pipeline import Pipeline
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
@@ -266,30 +263,9 @@ def run_cohort(label, nbfile, color):
                 thresholds=dca_table.index.to_numpy(), nb_best=nb_best, nb_all=nb_all, nb_none=nb_none)
 
 
-class _SplitBandHandler(HandlerBase):
-    """Legend handler for the shared '95% CI' entry: draws a borderless patch,
-    left half in `left_color` (50+), right half in `right_color` (65+), both at
-    the same alpha as the plotted fill_between bands -- since both cohorts share
-    this one legend row, the swatch itself carries the per-cohort colour split."""
-    def __init__(self, left_color, right_color, alpha):
-        super().__init__()
-        self.left_color = left_color
-        self.right_color = right_color
-        self.alpha = alpha
-
-    def create_artists(self, legend, orig_handle, xdescent, ydescent, width, height, fontsize, trans):
-        left = Rectangle((-xdescent, -ydescent), width / 2, height,
-                         facecolor=self.left_color, alpha=self.alpha, linewidth=0, transform=trans)
-        right = Rectangle((-xdescent + width / 2, -ydescent), width / 2, height,
-                          facecolor=self.right_color, alpha=self.alpha, linewidth=0, transform=trans)
-        return [left, right]
-
-
 def plot(results):
     plt.rcParams.update({"font.size": 11, "axes.edgecolor": "#888888"})
     fig, (ax_cal, ax_dca) = plt.subplots(1, 2, figsize=(15.5, 6.4))
-    blue_color = next(r["color"] for r in results if r["label"] == "50+")
-    red_color = next(r["color"] for r in results if r["label"] == "65+")
 
     # ── Left panel: Calibration overlay (Platt-recalibrated, best model per cohort) ──
     ax_cal.grid(True, color="#000000", alpha=0.08, linewidth=0.8)
@@ -299,20 +275,12 @@ def plot(results):
     for r in results:
         ax_cal.plot(r["prob_grid"], r["prob_true_mean"], color=r["color"], linewidth=2.2,
                    zorder=3, label=f'{r["label"]} · {r["model"]} (Platt-recalibrated, bootstrap mean)')
-        ax_cal.fill_between(r["prob_grid"], r["prob_true_lo"], r["prob_true_hi"],
-                            color=r["color"], alpha=0.15, zorder=1.5, linewidth=0)
     ax_cal.set_xlim(0, 1.0)
     ax_cal.set_ylim(0, 1.02)
     ax_cal.set_xlabel("Mean predicted probability")
     ax_cal.set_ylabel("Observed frequency")
     ax_cal.set_title("Calibration (Platt-recalibrated)", fontsize=12, loc="left")
-    # shared "95% CI" entry: a proxy handle rendered by _SplitBandHandler as a blue/red split patch
-    cal_handles, cal_labels = ax_cal.get_legend_handles_labels()
-    cal_ci_proxy = Rectangle((0, 0), 1, 1)
-    cal_handles.append(cal_ci_proxy)
-    cal_labels.append("95% CI")
-    ax_cal.legend(cal_handles, cal_labels, handler_map={cal_ci_proxy: _SplitBandHandler(blue_color, red_color, 0.15)},
-                 loc="upper left", frameon=True, framealpha=0.9, fontsize=9.5)
+    ax_cal.legend(loc="upper left", frameon=True, framealpha=0.9, fontsize=9.5)
     for s in ("top", "right"):
         ax_cal.spines[s].set_visible(False)
 
@@ -339,8 +307,7 @@ def plot(results):
     for s in ("top", "right"):
         ax_dca.spines[s].set_visible(False)
 
-    fig.suptitle(f"Cross-cohort calibration & decision-curve analysis — best model per age cohort (2024 test set); "
-                 f"calibration band is {N_BOOT_DRAW} bootstrap resamples (mean, 95% CI)",
+    fig.suptitle("Cross-cohort calibration & decision-curve analysis — best model per age cohort (2024 test set)",
                  fontsize=12.5, x=0.01, ha="left")
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(OUT_PNG, dpi=PNG_DPI, bbox_inches="tight")
