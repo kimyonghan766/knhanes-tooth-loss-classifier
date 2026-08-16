@@ -169,6 +169,7 @@ def run_cohort(label, nbfile, color):
     rec_grid = np.linspace(0, 1, GRID_N)
     roc_draws, pr_draws = [], []           # only the first DISPLAY_N_DRAW raw curves are kept, for plotting
     tpr_interp_all, prec_interp_all = [], []
+    ap_boot, auc_boot = [], []             # per-draw scalar AUPRC/AUC, for the legend's 95% CI
     for i, bi in enumerate(boot_idx):
         yb, pb, wb = y_test[bi], proba[bi], w[bi]
         fpr_b, tpr_b, _ = roc_curve(yb, pb, sample_weight=wb)
@@ -179,6 +180,8 @@ def run_cohort(label, nbfile, color):
         tpr_interp_all.append(np.interp(fpr_grid, fpr_b, tpr_b))
         order = np.argsort(rec_b)
         prec_interp_all.append(np.interp(rec_grid, rec_b[order], prec_b[order]))
+        ap_boot.append(average_precision_score(yb, pb, sample_weight=wb))
+        auc_boot.append(roc_auc_score(yb, pb, sample_weight=wb))
 
     tpr_interp_all = np.array(tpr_interp_all)
     prec_interp_all = np.array(prec_interp_all)
@@ -186,12 +189,15 @@ def run_cohort(label, nbfile, color):
     prec_mean = prec_interp_all.mean(axis=0)
     tpr_lo, tpr_hi = np.percentile(tpr_interp_all, [2.5, 97.5], axis=0)
     prec_lo, prec_hi = np.percentile(prec_interp_all, [2.5, 97.5], axis=0)
+    ap_lo, ap_hi = np.percentile(ap_boot, [2.5, 97.5])
+    auc_lo, auc_hi = np.percentile(auc_boot, [2.5, 97.5])
 
-    print(f"[{label}] {best_name}: AUPRC {ap:.4f} (reported {reported_ap:.4f})  "
-          f"AUC {auc:.4f} (reported {reported_auc:.4f})  n_test {len(y_test)}  "
-          f"n_boot {N_BOOT_DRAW}")
+    print(f"[{label}] {best_name}: AUPRC {ap:.4f} (reported {reported_ap:.4f}, "
+          f"95% CI {ap_lo:.4f}-{ap_hi:.4f})  "
+          f"AUC {auc:.4f} (reported {reported_auc:.4f}, 95% CI {auc_lo:.4f}-{auc_hi:.4f})  "
+          f"n_test {len(y_test)}  n_boot {N_BOOT_DRAW}")
     return dict(label=label, model=best_name, color=color, baseline=baseline,
-                ap=ap, auc=auc,
+                ap=ap, auc=auc, ap_lo=ap_lo, ap_hi=ap_hi, auc_lo=auc_lo, auc_hi=auc_hi,
                 roc_draws=roc_draws, pr_draws=pr_draws,
                 fpr_grid=fpr_grid, tpr_mean=tpr_mean, tpr_lo=tpr_lo, tpr_hi=tpr_hi,
                 rec_grid=rec_grid, prec_mean=prec_mean, prec_lo=prec_lo, prec_hi=prec_hi)
@@ -231,7 +237,7 @@ def plot(results):
         for fpr_b, tpr_b in r["roc_draws"]:
             ax_roc.plot(fpr_b, tpr_b, color=r["color"], linewidth=0.7, alpha=0.30, zorder=2.5)
         ax_roc.plot(r["fpr_grid"], r["tpr_mean"], color=r["color"], linewidth=2.4, zorder=3,
-                   label=f'{r["label"]} · {r["model"]}  (AUC {r["auc"]:.3f})')
+                   label=f'{r["label"]} · {r["model"]}  (AUC {r["auc"]:.3f} ({r["auc_lo"]:.3f} - {r["auc_hi"]:.3f}))')
         ax_roc.fill_between(r["fpr_grid"], r["tpr_lo"], r["tpr_hi"],
                             color=r["color"], alpha=0.15, zorder=1.5, linewidth=0)
     ax_roc.set_xlim(0, 1.0)
@@ -259,7 +265,7 @@ def plot(results):
         for rec_b, prec_b in r["pr_draws"]:
             ax_pr.plot(rec_b, prec_b, color=r["color"], linewidth=0.7, alpha=0.30, zorder=2.5)
         ax_pr.plot(r["rec_grid"], r["prec_mean"], color=r["color"], linewidth=2.4, zorder=3,
-                   label=f'{r["label"]} · {r["model"]}  (AUPRC {r["ap"]:.3f})')
+                   label=f'{r["label"]} · {r["model"]}  (AUPRC {r["ap"]:.3f} ({r["ap_lo"]:.3f} - {r["ap_hi"]:.3f}))')
         ax_pr.fill_between(r["rec_grid"], r["prec_lo"], r["prec_hi"],
                            color=r["color"], alpha=0.15, zorder=1.5, linewidth=0)
     # one representative "Chance" legend entry for both (differently-valued) baselines
