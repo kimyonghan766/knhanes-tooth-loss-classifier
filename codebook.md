@@ -458,7 +458,8 @@ Disease-specific variable prefixes and deviations from the standard pattern:
 |`HE_nARM`|N(1)|Arm used for BP measurement|1 Right · 2 Left|
 |`HE_armcir`|N(3)|Arm circumference|cm (1 decimal)|
 |`HE_sbp1/2/3`, `HE_dbp1/2/3`|N(8)|Systolic/diastolic BP, measurements 1–3|mmHg|
-|`HE_sbp`, `HE_dbp`|N(8)*|Final systolic/diastolic BP (derived; mean of readings 2 & 3)|mmHg|
+|`HE_sbp`|N(8)*|Final systolic BP (derived; mean of readings 2 & 3)|mmHg|
+|`HE_dbp`|N(8)*|Final diastolic BP (derived; mean of readings 2 & 3)|mmHg|
 |`HE_HP`|N(1)*|Hypertension status (derived)|1 Normal (SBP<120 & DBP<80) · 2 Elevated (SBP 120–129 & DBP<80) · 3 Pre-hypertension (SBP 130–139 or DBP 80–89) · 4 Hypertension (SBP≥140 or DBP≥90 or on medication)|
 
 _Note: BP device changed from mercury to non-mercury sphygmomanometer across cycles; conversion formulas exist in source for cross-cycle comparison — see PDF p.176–177 if merging with pre-2020 data._
