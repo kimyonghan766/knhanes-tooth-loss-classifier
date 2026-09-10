@@ -65,18 +65,18 @@ os.chdir(MAIN)                      # notebooks read ../csv/ relative to Main/
 
 # label, notebook file, plot colour (Okabe-Ito blue / true red -- validated CVD-safe pair)
 COHORTS = [
-    ("50+",  "final.ipynb",       "#0072B2"),
-    ("65+",  "final(65+).ipynb",  "#D62728"),
+    ("50+",  "final_catboost.ipynb",     "#0072B2"),
+    ("65+",  "final_65+_catboost.ipynb", "#D62728"),
 ]
-DATA_CELL = 47                      # cell that defines X_train/X_test/y_train/y_test/w_test_arr,
-                                     # make_imputer, make_scaler, SCALE_POS_WEIGHT and `cv`
+DATA_CELL = 37                      # cell 28 defines X_train/X_test/y_train/y_test/w_test_arr,
+                                     # make_imputer, make_scaler, feature_cols; cell 37 adds
+                                     # SCALE_POS_WEIGHT and `cv`. Cell 39's Optuna run is skipped.
 N_BINS = 10                         # matches the notebooks' calibration_curve(..., n_bins=10, strategy='uniform')
 DCA_THRESHOLDS = np.arange(0.01, 0.51, 0.01)   # matches notebook cell 84's dca_thresholds
 N_BOOT_DRAW = 2000                  # bootstrap draws for the calibration curve's 95% CI band
                                      # (matches the notebooks' own bootstrap-CI convention, cell 56)
 GRID_N = 200                        # points on the common predicted-probability grid for the CI band
 OUT_PNG = os.path.join(HERE, "calibration_dca_overlay.png")
-OUT_PDF = os.path.join(HERE, "calibration_dca_overlay.pdf")
 PNG_DPI = 600                       # Elsevier-grade combination art
 
 
@@ -91,13 +91,15 @@ def cell_output_text(cell):
 
 
 def recover_best_and_all_params(nb):
-    """Best model name + reported Test AUPRC/AUC (from cell 54's printed summary line),
-    and every tuned model's best_params + CV AUPRC (from cell 49's printed lines) --
-    all read live from the notebook's saved outputs, never re-searched."""
+    """Pinned model name + reported Test AUPRC/AUC (from cell 44's printed summary line),
+    and every tuned model's best_params + CV AUPRC (from cell 39's printed lines) --
+    all read live from the notebook's saved outputs, never re-searched. The _catboost
+    notebooks HARD-PIN CatBoost across cohorts (cell 44); this need not be the
+    OOF-AUPRC leaderboard winner (for the 65+ cohort it is not)."""
     best_name = reported_ap = reported_auc = None
     for c in nb["cells"]:
-        m = re.search(r"Best model by OOF AUPRC:\s*([A-Za-z ]+?)\s*\(OOF AUPRC\s*=\s*[\d.]+\)"
-                      r"\s*\|\s*Test AUPRC:\s*([\d.]+)\s*\|\s*Test AUC:\s*([\d.]+)",
+        m = re.search(r"Model pinned for cross-cohort SHAP comparability:\s*([A-Za-z ]+?)\s*"
+                      r"\(OOF AUPRC\s*=\s*[\d.]+\s*\|\s*Test AUPRC:\s*([\d.]+)\s*\|\s*Test AUC:\s*([\d.]+)",
                       cell_output_text(c))
         if m:
             best_name = m.group(1).strip()
@@ -205,9 +207,14 @@ def run_cohort(label, nbfile, color):
         est.fit(X_train, y_train)
         fitted_models[name] = est
 
-    best_name = max(oof_auprc, key=oof_auprc.get)   # rank by OOF AUPRC, matches cell 54
-    assert best_name == reported_best_name, \
-        f"{label}: recomputed best model {best_name!r} != notebook's reported {reported_best_name!r}"
+    # The _catboost notebooks hard-pin CatBoost for cross-cohort SHAP comparability
+    # (cell 44), overriding the OOF-AUPRC leaderboard -- so use the pinned name from the
+    # notebook's saved output rather than recomputing the OOF winner here (which, for the
+    # 65+ cohort, is Logistic Regression, not the pinned CatBoost). The AUPRC/AUC drift
+    # asserts below still verify the refit pinned model matches the notebook.
+    best_name = reported_best_name
+    assert best_name in fitted_models, \
+        f"{label}: pinned model {best_name!r} not among refit models {list(fitted_models)}"
     best_model = fitted_models[best_name]
     proba_best_raw = best_model.predict_proba(X_test)[:, 1]
     ap = average_precision_score(y_test, proba_best_raw, sample_weight=w_test)
@@ -311,8 +318,7 @@ def plot(results):
                  fontsize=12.5, x=0.01, ha="left")
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(OUT_PNG, dpi=PNG_DPI, bbox_inches="tight")
-    fig.savefig(OUT_PDF, bbox_inches="tight")
-    print(f"\nWrote {OUT_PNG} ({PNG_DPI} dpi) and {OUT_PDF}")
+    print(f"\nWrote {OUT_PNG} ({PNG_DPI} dpi)")
 
 
 if __name__ == "__main__":

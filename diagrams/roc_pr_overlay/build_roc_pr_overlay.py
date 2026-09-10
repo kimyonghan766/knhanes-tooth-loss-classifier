@@ -54,17 +54,17 @@ os.chdir(MAIN)                      # notebooks read ../csv/ relative to Main/
 
 # label, notebook file, plot colour (Okabe-Ito blue / true red -- validated CVD-safe pair)
 COHORTS = [
-    ("50+",  "final.ipynb",       "#0072B2"),
-    ("65+",  "final(65+).ipynb",  "#D62728"),
+    ("50+",  "final_catboost.ipynb",     "#0072B2"),
+    ("65+",  "final_65+_catboost.ipynb", "#D62728"),
 ]
-DATA_CELL = 47                      # cell that defines X_train/X_test/y_train/y_test/w_test_arr,
-                                     # make_imputer, make_scaler and SCALE_POS_WEIGHT
+DATA_CELL = 37                      # cell 28 defines X_train/X_test/y_train/y_test/w_test_arr,
+                                     # make_imputer, make_scaler, feature_cols; cell 37 adds
+                                     # SCALE_POS_WEIGHT + cv. Cell 39's Optuna run is skipped.
 N_BOOT_DRAW = 2000                  # bootstrap draws used for the mean curve + 95% CI band
                                      # (matches the notebooks' own bootstrap-CI convention, cell 56)
 DISPLAY_N_DRAW = 15                 # subsample of N_BOOT_DRAW plotted as individual spaghetti lines
 GRID_N = 200                        # points on the common FPR / recall grid used for the mean/CI band
 OUT_PNG = os.path.join(HERE, "roc_pr_overlay.png")
-OUT_PDF = os.path.join(HERE, "roc_pr_overlay.pdf")
 PNG_DPI = 600                       # Elsevier-grade combination art
 
 
@@ -79,13 +79,15 @@ def cell_output_text(cell):
 
 
 def recover_best(nb):
-    """Best model name, its reported (survey-weighted) Test AUPRC/AUC, and its
+    """Pinned model name, its reported (survey-weighted) Test AUPRC/AUC, and its
     Optuna-tuned params -- all read live from the notebook's saved outputs, so this
-    tracks the notebook without re-running the (expensive) Optuna search."""
+    tracks the notebook without re-running the (expensive) Optuna search. The
+    _catboost notebooks HARD-PIN CatBoost across cohorts (cell 44), which need not be
+    the OOF-AUPRC leaderboard winner."""
     best_name = reported_ap = reported_auc = None
     for c in nb["cells"]:
-        m = re.search(r"Best model by OOF AUPRC:\s*([A-Za-z ]+?)\s*\(OOF AUPRC\s*=\s*[\d.]+\)"
-                      r"\s*\|\s*Test AUPRC:\s*([\d.]+)\s*\|\s*Test AUC:\s*([\d.]+)",
+        m = re.search(r"Model pinned for cross-cohort SHAP comparability:\s*([A-Za-z ]+?)\s*"
+                      r"\(OOF AUPRC\s*=\s*[\d.]+\s*\|\s*Test AUPRC:\s*([\d.]+)\s*\|\s*Test AUC:\s*([\d.]+)",
                       cell_output_text(c))
         if m:
             best_name = m.group(1).strip()
@@ -290,8 +292,7 @@ def plot(results):
                  fontsize=12.5, x=0.01, ha="left")
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(OUT_PNG, dpi=PNG_DPI, bbox_inches="tight")
-    fig.savefig(OUT_PDF, bbox_inches="tight")
-    print(f"\nWrote {OUT_PNG} ({PNG_DPI} dpi) and {OUT_PDF}")
+    print(f"\nWrote {OUT_PNG} ({PNG_DPI} dpi)")
 
 
 if __name__ == "__main__":

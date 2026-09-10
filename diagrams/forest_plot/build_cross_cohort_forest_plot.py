@@ -40,8 +40,8 @@ from codebook_labels import label_for
 # label, notebook file, plot colour (blue/red -- validated CVD-safe pair, matches the
 # ROC/PR and calibration/DCA overlay figures), marker shape
 COHORTS = [
-    ("50+", "final.ipynb",       "#0072B2", "o"),
-    ("65+", "final(65+).ipynb",  "#D62728", "s"),
+    ("50+", "final_catboost.ipynb",     "#0072B2", "o"),
+    ("65+", "final_65+_catboost.ipynb", "#D62728", "s"),
 ]
 MM_PER_IN = 25.4
 FIG_WIDTH_MM = 190                  # Elsevier double-column width
@@ -293,12 +293,8 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
              color="#777777", style="italic")
 
     out_base = OUT_BASENAME + out_suffix
-    for ext, kw in ((".png", dict(dpi=600)),
-                    (".pdf", dict()),
-                    (".tiff", dict(dpi=600, pil_kwargs={"compression": "tiff_lzw"}))):
-        fig.savefig(out_base + ext, bbox_inches="tight", **kw)
-    print(f"\nWrote {out_base}.png (600 dpi), {out_base}.pdf (vector), "
-          f"{out_base}.tiff (600 dpi, LZW) -- {n_vars} rows "
+    fig.savefig(out_base + ".png", bbox_inches="tight", dpi=600)
+    print(f"\nWrote {out_base}.png (600 dpi) -- {n_vars} rows "
           f"({len(both)} shared, {len(only_a)} {label_a}-only, {len(only_b)} {label_b}-only)")
 
 
@@ -309,11 +305,7 @@ if __name__ == "__main__":
         cohort_data_lookup[label] = (rows, n_complete, prevalence, top_n)
         print(f"[{label}] parsed {len(rows)} rows from {nbfile}  "
               f"(n_complete={n_complete}, prevalence={prevalence:.1f}%, TOP_N_SHAP={top_n})")
-    # Two outlier-handling variants for review (which one ends up in the paper is
-    # still an open call -- see the module docstring's cross-cohort note above):
-    #   "clip"     -- truncate the outlier's whisker at the axis edge with an
-    #                 arrow marker + exact aOR (95% CI) printed as text.
-    #   "annotate" -- drop the outlier's marker/whisker entirely; report its
-    #                 aOR (95% CI) as a text-only callout on its row.
-    for mode, suffix in (("clip", "_clipped"), ("annotate", "_annotated")):
-        plot(COHORTS, cohort_data_lookup, mode, suffix)
+    # "annotate" outlier handling: drop the outlier's marker/whisker entirely and report
+    # its aOR (95% CI) as a text-only callout on its row. (The "clip" variant -- arrow
+    # marker at the axis edge -- has been retired.)
+    plot(COHORTS, cohort_data_lookup, "annotate", "_annotated")

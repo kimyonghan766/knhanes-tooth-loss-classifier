@@ -216,5 +216,4 @@ draw_box(ax, 78, 96, LEAF_Y0, LEAF_Y1, INF_LEAF_B_TEXT, fontsize=FS_LEAF)
 
 plt.tight_layout()
 fig.savefig(OUT_BASENAME + ".png", dpi=600, facecolor="white")
-fig.savefig(OUT_BASENAME + ".pdf", facecolor="white")
-print(f"Saved {OUT_BASENAME}.png (600 dpi) and .pdf  (figure size {FIG_W:.2f} x {FIG_H:.2f} in)")
+print(f"Saved {OUT_BASENAME}.png (600 dpi)  (figure size {FIG_W:.2f} x {FIG_H:.2f} in)")

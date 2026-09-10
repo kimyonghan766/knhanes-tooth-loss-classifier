@@ -45,12 +45,13 @@ from codebook_labels import label_list
 # label, notebook file
 # reported Test AUPRC/AUC are read live from each notebook (recover_best), never hardcoded
 COHORTS = [
-    ("Age 50+", "final.ipynb"),
-    ("Age 65+", "final(65+).ipynb"),
+    ("Age 50+", "final_catboost.ipynb"),
+    ("Age 65+", "final_65+_catboost.ipynb"),
 ]
-DATA_CELL = 47                      # cell that defines X_train/X_test/y_train/y_test/w_test_arr/
-                                     # feature_cols, make_imputer, make_scaler and SCALE_POS_WEIGHT
-SHAP_MAX_DISPLAY = 20                # matches notebook cell 70's SHAP_MAX_DISPLAY
+DATA_CELL = 37                      # cell that defines X_train/X_test/y_train/y_test/w_test_arr/
+                                     # feature_cols, make_imputer, make_scaler (cell 28) and
+                                     # SCALE_POS_WEIGHT + cv (cell 37); cell 39's Optuna run is skipped
+SHAP_MAX_DISPLAY = 20                # matches notebook cell 54's SHAP_MAX_DISPLAY
 OUT_BASENAME = os.path.join(HERE, "cross_cohort_shap_summary_overlay")
 
 
@@ -65,14 +66,15 @@ def cell_output_text(cell):
 
 
 def recover_best(nb):
-    """Best model name, its reported (survey-weighted) Test AUPRC/AUC, and its
+    """Pinned model name, its reported (survey-weighted) Test AUPRC/AUC, and its
     Optuna-tuned params — all read live from the notebook's saved outputs, so this
-    tracks the notebook. Selection itself is by OOF AUPRC (leakage-free); Test
-    AUPRC/AUC are reported, never used to choose — see cell 54's comment."""
+    tracks the notebook. The _catboost notebooks HARD-PIN CatBoost for cross-cohort
+    SHAP comparability (cell 44), which need not be the OOF-AUPRC leaderboard winner —
+    that pin is what this figure explains."""
     best_name = reported_ap = reported_auc = None
     for c in nb["cells"]:
-        m = re.search(r"Best model by OOF AUPRC:\s*([A-Za-z ]+?)\s*\(OOF AUPRC\s*=\s*[\d.]+\)"
-                      r"\s*\|\s*Test AUPRC:\s*([\d.]+)\s*\|\s*Test AUC:\s*([\d.]+)",
+        m = re.search(r"Model pinned for cross-cohort SHAP comparability:\s*([A-Za-z ]+?)\s*"
+                      r"\(OOF AUPRC\s*=\s*[\d.]+\s*\|\s*Test AUPRC:\s*([\d.]+)\s*\|\s*Test AUC:\s*([\d.]+)",
                       cell_output_text(c))
         if m:
             best_name = m.group(1).strip()
@@ -188,8 +190,7 @@ def plot(results):
     fig.suptitle("Cross-cohort SHAP feature attribution — best model per age cohort", fontsize=13, y=1.02)
     plt.tight_layout()
     fig.savefig(OUT_BASENAME + ".png", dpi=600, bbox_inches="tight")
-    fig.savefig(OUT_BASENAME + ".pdf", bbox_inches="tight")
-    print(f"\nWrote {OUT_BASENAME}.png (600 dpi) and {OUT_BASENAME}.pdf")
+    print(f"\nWrote {OUT_BASENAME}.png (600 dpi)")
 
 
 if __name__ == "__main__":
