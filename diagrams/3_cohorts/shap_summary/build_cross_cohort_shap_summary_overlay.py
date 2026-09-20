@@ -52,8 +52,19 @@ COHORTS = [
 DATA_CELL = 37                      # cell that defines X_train/X_test/y_train/y_test/w_test_arr/
                                      # feature_cols, make_imputer, make_scaler (cell 28) and
                                      # SCALE_POS_WEIGHT + cv (cell 37); cell 39's Optuna run is skipped
-SHAP_MAX_DISPLAY = 20                # matches notebook cell 54's SHAP_MAX_DISPLAY
+SHAP_MAX_DISPLAY = 15                # top-15 (notebook cell 54 uses 20; this figure intentionally trims to 15)
 OUT_BASENAME = os.path.join(HERE, "cross_cohort_shap_summary_overlay")
+
+# Shortened axis labels for THIS figure only (codebook_labels.py / codebook.md stay
+# untouched so the notebooks' own SHAP plots keep the full wording) -- frees up
+# left-margin width so the beeswarm plots themselves can render larger.
+LABEL_OVERRIDES = {
+    "Daily brushing frequency (count)": "Daily brushing frequency",
+    "Diabetes (diagnosed or HbA1c ≥ 6.5%)": "Diabetes",
+    "Dong/Eup-Myeon classification": "Urban/Rural",
+    "Estimated kidney function (eGFR, CKD-EPI)": "eGFR",
+    "Frequency of fruit intake, past year": "Freq. fruit intake",
+}
 
 
 def cell_output_text(cell):
@@ -170,7 +181,7 @@ def run_cohort(label, nbfile):
     # summary_plot's own max_display truncates to the top SHAP_MAX_DISPLAY, and
     # codebook_labels supplies the same plain-English axis labels as the notebook.
     feature_cols = ns["feature_cols"]
-    names = label_list(feature_cols)
+    names = [LABEL_OVERRIDES.get(n, n) for n in label_list(feature_cols)]
 
     print(f"[{label}] {best_name}: AUPRC {ap:.4f} (reported {reported_ap:.4f})  "
           f"AUC {auc:.4f} (reported {reported_auc:.4f})  "
@@ -180,18 +191,27 @@ def run_cohort(label, nbfile):
 
 
 def plot(results):
-    plt.rcParams.update({"font.size": 10})
-    fig, axes = plt.subplots(1, 3, figsize=(36, 8))
-    for ax, r in zip(axes, results):
+    plt.rcParams.update({"font.size": 23, "font.weight": "bold", "axes.labelweight": "bold"})
+    fig, axes = plt.subplots(2, 2, figsize=(34, 24))
+    by_label = {r["label"]: r for r in results}
+    # 50+ and 65+ on top, 50-64 bottom-left; bottom-right left empty (2x2 grid, 3 panels)
+    positions = {
+        "Age 50+": axes[0, 0],
+        "Age 65+": axes[0, 1],
+        "Age 50-64": axes[1, 0],
+    }
+    axes[1, 1].axis("off")
+    for label, ax in positions.items():
+        r = by_label[label]
         plt.sca(ax)
         shap.summary_plot(r["shap_values"], r["X"], feature_names=r["names"], show=False,
                           max_display=SHAP_MAX_DISPLAY,
                           plot_size=None)          # None = don't let shap override our figsize
-        ax.set_title(f'SHAP Summary — {r["model"]} ({r["label"]})', fontsize=12)
-    fig.suptitle("Cross-cohort SHAP feature attribution — best model per age cohort", fontsize=13, y=1.02)
+        ax.set_title(f'{r["model"]} ({r["label"]})', fontsize=25, fontweight="bold")
+    fig.suptitle("Cross-cohort SHAP feature attribution — best model per age cohort", fontsize=27, fontweight="bold", y=1.02)
     plt.tight_layout()
-    fig.savefig(OUT_BASENAME + ".png", dpi=600, bbox_inches="tight")
-    print(f"\nWrote {OUT_BASENAME}.png (600 dpi)")
+    fig.savefig(OUT_BASENAME + ".png", dpi=900, bbox_inches="tight")
+    print(f"\nWrote {OUT_BASENAME}.png (900 dpi)")
 
 
 if __name__ == "__main__":
