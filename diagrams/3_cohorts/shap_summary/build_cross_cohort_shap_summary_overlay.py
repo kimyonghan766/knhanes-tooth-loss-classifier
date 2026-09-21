@@ -64,6 +64,7 @@ LABEL_OVERRIDES = {
     "Dong/Eup-Myeon classification": "Urban/Rural",
     "Estimated kidney function (eGFR, CKD-EPI)": "eGFR",
     "Frequency of fruit intake, past year": "Freq. fruit intake",
+    "Current smoking rate indicator": "Current smoking rate",
 }
 
 
@@ -191,8 +192,8 @@ def run_cohort(label, nbfile):
 
 
 def plot(results):
-    plt.rcParams.update({"font.size": 23, "font.weight": "bold", "axes.labelweight": "bold"})
-    fig, axes = plt.subplots(2, 2, figsize=(34, 24))
+    plt.rcParams.update({"font.size": 9, "font.weight": "normal", "axes.labelweight": "normal"})
+    fig, axes = plt.subplots(2, 2, figsize=(11.69, 8.25))   # A4 landscape width, same 34:24 aspect ratio as before
     by_label = {r["label"]: r for r in results}
     # 50+ and 65+ on top, 50-64 bottom-left; bottom-right left empty (2x2 grid, 3 panels)
     positions = {
@@ -201,14 +202,21 @@ def plot(results):
         "Age 50-64": axes[1, 0],
     }
     axes[1, 1].axis("off")
+    LABEL_FONTSIZE = 10   # feature-name labels; also applied to x-axis, its numbers, and the colorbar
     for label, ax in positions.items():
         r = by_label[label]
         plt.sca(ax)
+        n_axes_before = len(fig.axes)
         shap.summary_plot(r["shap_values"], r["X"], feature_names=r["names"], show=False,
                           max_display=SHAP_MAX_DISPLAY,
                           plot_size=None)          # None = don't let shap override our figsize
-        ax.set_title(f'{r["model"]} ({r["label"]})', fontsize=25, fontweight="bold")
-    fig.suptitle("Cross-cohort SHAP feature attribution — best model per age cohort", fontsize=27, fontweight="bold", y=1.02)
+        ax.tick_params(axis="y", labelsize=LABEL_FONTSIZE)
+        ax.tick_params(axis="x", labelsize=LABEL_FONTSIZE)
+        ax.xaxis.label.set_size(LABEL_FONTSIZE)    # "SHAP value (impact on model output)"
+        for cax in fig.axes[n_axes_before:]:        # the colorbar axis shap just added
+            cax.tick_params(labelsize=LABEL_FONTSIZE)   # "High" / "Low"
+            cax.yaxis.label.set_size(LABEL_FONTSIZE)    # "Feature value"
+        ax.set_title(f'{r["model"]} ({r["label"]})', fontsize=11, fontweight="normal")
     plt.tight_layout()
     fig.savefig(OUT_BASENAME + ".png", dpi=900, bbox_inches="tight")
     print(f"\nWrote {OUT_BASENAME}.png (900 dpi)")

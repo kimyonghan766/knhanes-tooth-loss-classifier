@@ -46,7 +46,7 @@ COHORTS = [
     ("65+",    "CB_65+.ipynb",    "#D62728", "s"),
 ]
 MM_PER_IN = 25.4
-FIG_WIDTH_MM = 190                  # Elsevier double-column width
+FIG_WIDTH_MM = 246.2                # A4 landscape width (297mm) minus 1in (25.4mm) margins each side
 OUT_BASENAME = os.path.join(HERE, "cross_cohort_forest_plot")
 
 
@@ -148,7 +148,7 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
     plt.rcParams.update({
         "font.family": "sans-serif",
         "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
-        "font.size": 10.5,
+        "font.size": 12.5,
         "axes.edgecolor": "#888888",
         "axes.linewidth": 0.7,
         "pdf.fonttype": 42,
@@ -234,11 +234,11 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
                             markerfacecolor=color if significant else "white",
                             markeredgecolor=color, markeredgewidth=0.8,
                             clip_on=False, zorder=3)
-                    ax.text(txt_x, y, label_txt, fontsize=7.8, va="center", ha=ha,
+                    ax.text(txt_x, y, label_txt, fontsize=9.0, va="center", ha=ha,
                             color=color, style="italic")
                 else:  # mode == "annotate": no marker/whisker on the shared axis at all
                     ax.text(txt_x, y, f"{label}: aOR {label_txt} — off shared scale",
-                            fontsize=7.8, va="center", ha=ha, color=color, style="italic")
+                            fontsize=9.0, va="center", ha=ha, color=color, style="italic")
                 continue
 
             xerr = [[r["aOR"] - r["lo"]], [r["hi"] - r["aOR"]]]
@@ -256,11 +256,11 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
     ax.set_xticklabels([f"{t:g}" for t in ticks])
     ax.set_yticks(all_y)
     tick_labels = [name if kind == "header" else label_for(name) for kind, name in render_items]
-    ax.set_yticklabels(tick_labels, fontsize=9.75)
+    ax.set_yticklabels(tick_labels, fontsize=11.5)
     for y, _ in header_rows:
         tick = ax.yaxis.get_ticklabels()[list(all_y).index(y)]
         tick.set_fontweight("bold")
-        tick.set_fontsize(10.2)
+        tick.set_fontsize(12.0)
         tick.set_color("#333333")
     ax.set_ylim(-0.5 * ROW_SPACING, (n_items - 0.5) * ROW_SPACING)
     ax.set_xlabel("Adjusted odds ratio (95% CI), log scale")
@@ -268,7 +268,7 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
     ax.set_title(
         "Adjusted odds ratios — SHAP-informed confirmatory model, by age cohort\n"
         f"union of {topn_str} SHAP-selected predictors",
-        fontsize=12, loc="left", pad=6)
+        fontsize=14, loc="left", pad=6)
     for s in ("top", "right", "left"):
         ax.spines[s].set_visible(False)
     ax.tick_params(axis="y", length=0)
@@ -295,12 +295,12 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
     plt.tight_layout(rect=[0, 0.12, 1, 1])
     leg = fig.legend(handles=legend_elems, loc="lower center", bbox_to_anchor=(0.5, 0.055),
                      ncol=3, frameon=True, framealpha=0.92,
-                     fontsize=9, handlelength=1.5, borderpad=0.6, columnspacing=1.2)
+                     fontsize=10.5, handlelength=1.5, borderpad=0.6, columnspacing=1.2)
     leg.get_frame().set_linewidth(0.5)
     footnote = "Fewer than all markers on a row = selected into only some cohorts' SHAP-informed models"
     if mode == "clip":
         footnote += "  |  arrow markers = point estimate off the shared axis, exact aOR (95% CI) printed alongside"
-    fig.text(0.5, 0.01, footnote, ha="center", va="bottom", fontsize=8.25,
+    fig.text(0.5, 0.01, footnote, ha="center", va="bottom", fontsize=9.5,
              color="#777777", style="italic")
 
     out_base = OUT_BASENAME + out_suffix
