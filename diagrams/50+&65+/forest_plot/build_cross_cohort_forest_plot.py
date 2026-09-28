@@ -47,6 +47,22 @@ MM_PER_IN = 25.4
 FIG_WIDTH_MM = 190                  # Elsevier double-column width
 OUT_BASENAME = os.path.join(HERE, "cross_cohort_forest_plot")
 
+# Regression-specific display units/contrasts. N_CA and N_NA are rescaled only
+# in the inferential model, so these overrides belong in the forest plot rather
+# than the shared SHAP/codebook label resolver.
+FOREST_LABEL_OVERRIDES = {
+    "N_CA": "Daily total calcium (per 100 mg)",
+    "N_NA": "Sodium intake (per 1,000 mg)",
+    "BD1": "Lifetime alcohol drinking experience",
+    "L_BR_FQ_2": "Breakfast 3–4×/week vs 5–7×/week",
+    "L_BR_FQ_3": "Breakfast 1–2×/week vs 5–7×/week",
+    "L_BR_FQ_4": "Breakfast almost never vs 5–7×/week",
+}
+
+
+def forest_label(name):
+    return FOREST_LABEL_OVERRIDES.get(name, label_for(name))
+
 
 def cell_output_text(cell):
     out = []
@@ -243,7 +259,7 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
     ax.set_xticks(ticks)
     ax.set_xticklabels([f"{t:g}" for t in ticks])
     ax.set_yticks(all_y)
-    tick_labels = [name if kind == "header" else label_for(name) for kind, name in render_items]
+    tick_labels = [name if kind == "header" else forest_label(name) for kind, name in render_items]
     ax.set_yticklabels(tick_labels, fontsize=6.5)
     for y, _ in header_rows:
         tick = ax.yaxis.get_ticklabels()[list(all_y).index(y)]

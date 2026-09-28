@@ -165,17 +165,21 @@ def run_cohort(label, nbfile):
         shap_values = (sv_raw[..., 1] if getattr(sv_raw, "ndim", 0) == 3
                        else (sv_raw[1] if isinstance(sv_raw, list) else sv_raw))
 
-    # ── No exclusion set: every feature competes on equal footing (cell 70) —
-    # summary_plot's own max_display truncates to the top SHAP_MAX_DISPLAY, and
-    # codebook_labels supplies the same plain-English axis labels as the notebook.
+    # ── Every feature competes on equal footing. Select and order the displayed
+    # rows by survey-weighted mean |SHAP|, then disable summary_plot's internal unweighted
+    # sorting so the figure matches the population-weighted global ranking.
     feature_cols = ns["feature_cols"]
-    names = label_list(feature_cols)
+    mean_abs_weighted = np.average(np.abs(shap_values), axis=0, weights=w)
+    weighted_top_idx = np.argsort(mean_abs_weighted)[::-1][:SHAP_MAX_DISPLAY]
+    weighted_top_features = [feature_cols[i] for i in weighted_top_idx]
+    names = label_list(weighted_top_features)
 
     print(f"[{label}] {best_name}: AUPRC {ap:.4f} (reported {reported_ap:.4f})  "
           f"AUC {auc:.4f} (reported {reported_auc:.4f})  "
           f"shap_values {shap_values.shape}  features {len(feature_cols)}")
     return dict(label=label, model=best_name,
-                shap_values=shap_values, X=X_test_imp, names=names)
+                shap_values=shap_values[:, weighted_top_idx],
+                X=X_test_imp[:, weighted_top_idx], names=names)
 
 
 def plot(results):
@@ -185,6 +189,7 @@ def plot(results):
         plt.sca(ax)
         shap.summary_plot(r["shap_values"], r["X"], feature_names=r["names"], show=False,
                           max_display=SHAP_MAX_DISPLAY,
+                          sort=False,       # preserve survey-weighted mean-|SHAP| ordering
                           plot_size=None)          # None = don't let shap override our figsize
         ax.set_title(f'SHAP Summary — {r["model"]} ({r["label"]})', fontsize=12)
     fig.suptitle("Cross-cohort SHAP feature attribution — best model per age cohort", fontsize=13, y=1.02)
