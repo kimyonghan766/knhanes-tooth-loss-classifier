@@ -5,9 +5,9 @@ Single figure, two panels: ROC (left), Precision-Recall (right), each
 showing ALL THREE age cohorts on the same axes -- 50+ in blue, 50-64 in
 orange, 65+ in red.
 
-Per cohort: 2000 stratified bootstrap resamples of that cohort's 2024 test
-set (prevalence-preserving, seed 42, same recipe -- and same draw count --
-as the notebooks' own bootstrap-CI cell, cell 56) drive a percentile-based
+Per cohort: 2000 PSU-within-stratum bootstrap resamples of that cohort's
+2024 test set (seed 42, matching the notebooks' reported-metric CI method)
+drive a percentile-based
 95% CI band (2.5th-97.5th percentile across all 2000 draws, interpolated
 onto a common grid) as a shaded region, with the mean curve as a bold line.
 A subsample of 15 of the 2000 draws are additionally drawn as thin
@@ -19,10 +19,10 @@ not for baseline-vs-model contrast as in a single-cohort figure.
 
 Why a separate script (not a notebook cell): each notebook only plots its
 own cohort's curves, from a single fit, with no bootstrap variability band.
-This rebuilds each cohort's data pipeline, refits only its best model using
+This rebuilds each cohort's data pipeline, refits the common pinned CatBoost model using
 the tuned params already recorded in the notebook, and bootstraps the FIXED
 test-set predictions (no refitting per draw -- proba/y_test/w are resampled
-together, matching the notebook's existing stratified-bootstrap idiom).
+together by PSU within survey stratum).
 
 Faithfulness: each notebook uses a deterministic temporal split (train
 2020-2023, test 2024) and fixed random_state=42, so the recomputed
@@ -32,8 +32,9 @@ the notebook reports. The script asserts this before drawing.
 Run with the same interpreter the notebooks used:
     ~/.pyenv/versions/3.11.9/bin/python build_roc_pr_overlay.py
 """
-import os, re, ast, json
+import os, re, ast, json, contextlib, io
 import numpy as np
+import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -59,9 +60,10 @@ COHORTS = [
     ("50-64",  "CB_50-64.ipynb",  "#E69F00"),
     ("65+",    "CB_65+.ipynb",    "#D62728"),
 ]
-DATA_CELL = 37                      # cell 28 defines X_train/X_test/y_train/y_test/w_test_arr,
-                                     # make_imputer, make_scaler, feature_cols; cell 37 adds
-                                     # SCALE_POS_WEIGHT + cv. Cell 39's Optuna run is skipped.
+# Execute only the cells needed to reconstruct the modeling frame. Notebook cell
+# numbers shifted when the screening and inferential sections were revised; a
+# positional slice now includes cell 34's full Optuna search, which must not be rerun.
+PIPELINE_CELLS = (2, 4, 5, 7, 9, 13, 15, 16, 25, 28, 32)
 N_BOOT_DRAW = 2000                  # bootstrap draws used for the mean curve + 95% CI band
                                      # (matches the notebooks' own bootstrap-CI convention, cell 56)
 DISPLAY_N_DRAW = 15                 # subsample of N_BOOT_DRAW plotted as individual spaghetti lines
@@ -127,16 +129,24 @@ def build_estimator(name, params, make_imputer, make_scaler, scale_pos_weight):
     raise ValueError(name)
 
 
-def stratified_boot_indices(y, n_draws, seed=42):
-    """Prevalence-preserving bootstrap of row indices -- same recipe as the
-    notebooks' _boot_idx (cell 56): resample the outcome-0 and outcome-1 rows
-    separately (with replacement) so every draw keeps the same class balance."""
+def psu_within_stratum_boot_indices(psu, strata, n_draws, seed=42):
+    """Sample PSUs with replacement within each survey stratum."""
     rng = np.random.default_rng(seed)
-    idx0 = np.where(y == 0)[0]
-    idx1 = np.where(y == 1)[0]
-    return [np.concatenate([rng.choice(idx0, idx0.size, replace=True),
-                            rng.choice(idx1, idx1.size, replace=True)])
-            for _ in range(n_draws)]
+    cluster_id = pd.factorize(
+        pd.Series(strata).astype(int).astype(str) + '_' + pd.Series(psu).astype(str)
+    )[0]
+    strata_id = pd.factorize(pd.Series(strata).astype(int).astype(str))[0]
+    strata_to_clusters = {s: np.unique(cluster_id[strata_id == s])
+                          for s in np.unique(strata_id)}
+    cluster_to_rows = {c: np.where(cluster_id == c)[0] for c in np.unique(cluster_id)}
+    draws = []
+    for _ in range(n_draws):
+        sampled_rows = []
+        for clusters in strata_to_clusters.values():
+            sampled = rng.choice(clusters, size=len(clusters), replace=True)
+            sampled_rows.extend(cluster_to_rows[c] for c in sampled)
+        draws.append(np.concatenate(sampled_rows))
+    return draws
 
 
 def run_cohort(label, nbfile, color):
@@ -146,9 +156,11 @@ def run_cohort(label, nbfile, color):
     _real_show = plt.show
     plt.show = lambda *a, **k: None
     try:
-        for c in nb["cells"][:DATA_CELL + 1]:
-            if c["cell_type"] == "code":
-                exec("".join(c["source"]), ns)
+        with contextlib.redirect_stdout(io.StringIO()):
+            for i in PIPELINE_CELLS:
+                c = nb["cells"][i]
+                if c["cell_type"] == "code":
+                    exec("".join(c["source"]), ns)
     finally:
         plt.show = _real_show
         plt.close("all")
@@ -158,6 +170,9 @@ def run_cohort(label, nbfile, color):
     proba = est.predict_proba(ns["X_test"])[:, 1]
     y_test = ns["y_test"].to_numpy()
     w = ns["w_test_arr"]
+    psu_test = ns["df_subset"].loc[ns["test_mask"], "psu"].to_numpy()
+    strata_test = ns["df_subset"].loc[ns["test_mask"], "kstrata"].to_numpy()
+    assert len(psu_test) == len(y_test) == len(w)
 
     ap = average_precision_score(y_test, proba, sample_weight=w)
     assert abs(ap - reported_ap) < 0.01, \
@@ -168,7 +183,7 @@ def run_cohort(label, nbfile, color):
     baseline = float(np.average(y_test, weights=w))
 
     # ── Bootstrap the FIXED test-set predictions (no refitting per draw) ──────
-    boot_idx = stratified_boot_indices(y_test, N_BOOT_DRAW)
+    boot_idx = psu_within_stratum_boot_indices(psu_test, strata_test, N_BOOT_DRAW)
     fpr_grid = np.linspace(0, 1, GRID_N)
     rec_grid = np.linspace(0, 1, GRID_N)
     roc_draws, pr_draws = [], []           # only the first DISPLAY_N_DRAW raw curves are kept, for plotting
@@ -287,7 +302,7 @@ def plot(results):
     for s in ("top", "right"):
         ax_pr.spines[s].set_visible(False)
 
-    fig.suptitle(f"Cross-cohort AUROC & AUPRC — best model per age cohort, "
+    fig.suptitle(f"Cross-cohort AUROC & AUPRC — common CatBoost model, "
                  f"{N_BOOT_DRAW} bootstrap resamples of the 2024 test set (mean, 95% CI)",
                  fontsize=12.5, x=0.01, ha="left")
     plt.tight_layout(rect=[0, 0, 1, 0.95])

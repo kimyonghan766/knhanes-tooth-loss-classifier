@@ -3,23 +3,22 @@ Cross-Cohort Calibration + DCA Overlay (50+ vs 50-64 vs 65+)
 =====================================================================
 Single figure, two panels: Platt-recalibrated calibration curve (left),
 Decision Curve Analysis / net benefit (right), each showing ALL THREE age
-cohorts on the same axes -- 50+ in blue, 50-64 in orange, 65+ in red (best
-model only, per cohort). Both panels reuse the notebooks' own algorithms
+cohorts on the same axes -- 50+ in blue, 50-64 in orange, 65+ in red (the
+common pinned CatBoost model). Both panels reuse the notebooks' algorithms
 verbatim (cells 54, 80, 84-85 of Main/CB_50+.ipynb / CB_50-64.ipynb / CB_65+.ipynb):
 
   - Calibration: out-of-fold (OOF) train-set probabilities for ALL 5 tuned
     models -> unpenalised Platt scaling (logistic regression on the logit of
     the OOF probabilities, C=inf) -> apply to the TEST set -> 10-bin
-    calibration_curve on the best model's recalibrated probabilities. A 95%
+    calibration curve on the common CatBoost model's recalibrated probabilities. A 95%
     CI band is added around this by bootstrapping the FIXED (y_test,
-    recalibrated proba) pairs 2000 times (prevalence-preserving, seed 42 --
-    same recipe and draw count as the notebooks' own bootstrap-CI cell,
-    cell 56, and as build_roc_pr_overlay.py), recomputing calibration_curve
-    per draw, and interpolating each draw onto a common predicted-probability
+    recalibrated proba, wt_itvex) values 2000 times by PSU within stratum
+    (seed 42), recomputing the weighted-bin calibration curve per draw and
+    interpolating each draw onto a common predicted-probability
     grid; the plotted center line is the bootstrap mean curve (not the
     single-fit curve) and the band is the 2.5th-97.5th percentile across
     draws.
-  - DCA: net benefit of the best model's recalibrated probabilities across
+  - DCA: net benefit of the common CatBoost model's recalibrated probabilities across
     thresholds 0.01-0.50 (dcurves), alongside "Treat all" (differs by
     cohort prevalence) and "Treat none" (0 for both) reference lines. No
     bootstrap band on this panel.
@@ -35,14 +34,14 @@ scaling, and cells 84-85's DCA exactly, without re-searching.
 Faithfulness: each notebook uses a deterministic temporal split (train
 2020-2023, test 2024), fixed random_state=42, and a fixed 5-fold
 StratifiedKFold(shuffle=True, random_state=42) for OOF (cell 47's `cv`),
-so the recomputed best-model Test AUPRC/AUC must equal the values the
-notebook reports, and the recomputed best model name must match. The
+so the recomputed common-model Test AUPRC/AUC must equal the values the
+notebook reports, and the recovered pinned model name must match. The
 script asserts both before drawing.
 
 Run with the same interpreter the notebooks used:
     ~/.pyenv/versions/3.11.9/bin/python build_calibration_dca_overlay.py
 """
-import os, re, ast, json
+import os, re, ast, json, contextlib, io
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -53,7 +52,6 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import cross_val_predict
 from sklearn.metrics import average_precision_score, roc_auc_score
-from sklearn.calibration import calibration_curve
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from catboost import CatBoostClassifier
@@ -69,9 +67,9 @@ COHORTS = [
     ("50-64",  "CB_50-64.ipynb",  "#E69F00"),
     ("65+",    "CB_65+.ipynb",    "#D62728"),
 ]
-DATA_CELL = 37                      # cell 28 defines X_train/X_test/y_train/y_test/w_test_arr,
-                                     # make_imputer, make_scaler, feature_cols; cell 37 adds
-                                     # SCALE_POS_WEIGHT and `cv`. Cell 39's Optuna run is skipped.
+# Execute only the cells needed to reconstruct the modeling frame. Avoid a
+# positional slice because notebook cell 34 is the expensive Optuna search.
+PIPELINE_CELLS = (2, 4, 5, 7, 9, 13, 15, 16, 25, 28, 32)
 N_BINS = 10                         # matches the notebooks' calibration_curve(..., n_bins=10, strategy='uniform')
 DCA_THRESHOLDS = np.arange(0.01, 0.51, 0.01)   # matches notebook cell 84's dca_thresholds
 N_BOOT_DRAW = 2000                  # bootstrap draws for the calibration curve's 95% CI band
@@ -162,17 +160,39 @@ def _logit(p, eps=1e-6):
     return np.log(p / (1 - p))
 
 
-def stratified_boot_indices(y, n_draws, seed=42):
-    """Prevalence-preserving bootstrap of row indices -- same recipe as the
-    notebooks' _boot_idx (cell 56) and build_roc_pr_overlay.py: resample the
-    outcome-0 and outcome-1 rows separately (with replacement) so every draw
-    keeps the same class balance."""
+def psu_within_stratum_boot_indices(psu, strata, n_draws, seed=42):
+    """Sample PSUs with replacement within each survey stratum."""
     rng = np.random.default_rng(seed)
-    idx0 = np.where(y == 0)[0]
-    idx1 = np.where(y == 1)[0]
-    return [np.concatenate([rng.choice(idx0, idx0.size, replace=True),
-                            rng.choice(idx1, idx1.size, replace=True)])
-            for _ in range(n_draws)]
+    cluster_id = pd.factorize(
+        pd.Series(strata).astype(int).astype(str) + '_' + pd.Series(psu).astype(str)
+    )[0]
+    strata_id = pd.factorize(pd.Series(strata).astype(int).astype(str))[0]
+    strata_to_clusters = {s: np.unique(cluster_id[strata_id == s])
+                          for s in np.unique(strata_id)}
+    cluster_to_rows = {c: np.where(cluster_id == c)[0] for c in np.unique(cluster_id)}
+    draws = []
+    for _ in range(n_draws):
+        sampled_rows = []
+        for clusters in strata_to_clusters.values():
+            sampled = rng.choice(clusters, size=len(clusters), replace=True)
+            sampled_rows.extend(cluster_to_rows[c] for c in sampled)
+        draws.append(np.concatenate(sampled_rows))
+    return draws
+
+
+def weighted_calibration_curve(y_true, y_prob, weight, n_bins=10):
+    """Uniform-bin calibration curve using interview-weighted bin means."""
+    edges = np.linspace(0.0, 1.0, n_bins + 1)
+    bin_idx = np.clip(np.digitize(y_prob, edges[1:-1]), 0, n_bins - 1)
+    prob_true, prob_pred = [], []
+    for b in range(n_bins):
+        mask = bin_idx == b
+        if not mask.any():
+            continue
+        wb = weight[mask]
+        prob_true.append(np.average(y_true[mask], weights=wb))
+        prob_pred.append(np.average(y_prob[mask], weights=wb))
+    return np.asarray(prob_true), np.asarray(prob_pred)
 
 
 def run_cohort(label, nbfile, color):
@@ -182,9 +202,11 @@ def run_cohort(label, nbfile, color):
     _real_show = plt.show
     plt.show = lambda *a, **k: None
     try:
-        for c in nb["cells"][:DATA_CELL + 1]:
-            if c["cell_type"] == "code":
-                exec("".join(c["source"]), ns)
+        with contextlib.redirect_stdout(io.StringIO()):
+            for i in PIPELINE_CELLS:
+                c = nb["cells"][i]
+                if c["cell_type"] == "code":
+                    exec("".join(c["source"]), ns)
     finally:
         plt.show = _real_show
         plt.close("all")
@@ -234,18 +256,20 @@ def run_cohort(label, nbfile, color):
 
     proba_best_recal = recal_proba_by_model[best_name]
     y_test_arr = y_test.to_numpy()
+    psu_test = ns["df_subset"].loc[ns["test_mask"], "psu"].to_numpy()
+    strata_test = ns["df_subset"].loc[ns["test_mask"], "kstrata"].to_numpy()
+    assert len(psu_test) == len(y_test_arr) == len(w_test)
 
     # ── Bootstrap the FIXED (y_test, recalibrated proba) pairs for a 95% CI band ──
-    # No refitting/re-recalibrating per draw -- same no-refit bootstrap idiom as
-    # build_roc_pr_overlay.py. Each draw's calibration_curve is interpolated onto a
-    # common predicted-probability grid; the plotted center line is the bootstrap
-    # mean, the band is the 2.5th-97.5th percentile across the N_BOOT_DRAW draws.
-    boot_idx = stratified_boot_indices(y_test_arr, N_BOOT_DRAW)
+    # No refitting/re-recalibrating per draw. PSUs are sampled within strata and
+    # respondents retain their original interview weights. Each weighted-bin curve
+    # is interpolated onto a common grid for the bootstrap mean and percentile band.
+    boot_idx = psu_within_stratum_boot_indices(psu_test, strata_test, N_BOOT_DRAW)
     prob_grid = np.linspace(0, 1, GRID_N)
     true_interp_all = []
     for bi in boot_idx:
-        yb, pb = y_test_arr[bi], proba_best_recal[bi]
-        prob_true_b, prob_pred_b = calibration_curve(yb, pb, n_bins=N_BINS, strategy="uniform")
+        yb, pb, wb = y_test_arr[bi], proba_best_recal[bi], w_test[bi]
+        prob_true_b, prob_pred_b = weighted_calibration_curve(yb, pb, wb, n_bins=N_BINS)
         true_interp_all.append(np.interp(prob_grid, prob_pred_b, prob_true_b))
     true_interp_all = np.array(true_interp_all)
     prob_true_mean = true_interp_all.mean(axis=0)
@@ -282,7 +306,7 @@ def plot(results):
                linestyle=(0, (5, 4)), alpha=0.8, zorder=2, label="Perfectly calibrated")
     for r in results:
         ax_cal.plot(r["prob_grid"], r["prob_true_mean"], color=r["color"], linewidth=2.2,
-                   zorder=3, label=f'{r["label"]} · {r["model"]} (Platt-recalibrated, bootstrap mean)')
+                   zorder=3, label=f'{r["label"]} · {r["model"]} (Platt-recalibrated)')
     ax_cal.set_xlim(0, 1.0)
     ax_cal.set_ylim(0, 1.02)
     ax_cal.set_xlabel("Mean predicted probability")
@@ -315,7 +339,7 @@ def plot(results):
     for s in ("top", "right"):
         ax_dca.spines[s].set_visible(False)
 
-    fig.suptitle("Cross-cohort calibration & decision-curve analysis — best model per age cohort (2024 test set)",
+    fig.suptitle("Cross-cohort calibration & decision-curve analysis — common CatBoost model (2024 test set)",
                  fontsize=12.5, x=0.01, ha="left")
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(OUT_PNG, dpi=PNG_DPI, bbox_inches="tight")

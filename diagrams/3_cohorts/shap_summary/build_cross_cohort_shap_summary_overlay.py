@@ -1,13 +1,13 @@
 """
 Combined Cross-Cohort SHAP Summary (50+ vs 50-64 vs 65+)
 =================================================
-Single figure, three panels side-by-side: the SHAP beeswarm summary for the
-best model in the 50+ cohort, the 50-64 cohort, and the 65+ cohort, each
+Single figure, three panels: the SHAP beeswarm summary for the common pinned
+CatBoost model in the 50+ cohort, the 50-64 cohort, and the 65+ cohort, each
 panel titled with its model and age cohort.
 
 Why a separate script (not a notebook cell): each notebook only plots its own
 cohort's SHAP summary (cell 68/70). This rebuilds each cohort's data pipeline,
-refits only its best model using the tuned params already recorded in the
+refits the common pinned CatBoost model using the tuned params recorded in the
 notebook, recomputes SHAP values exactly as cell 68/70 do (same TreeExplainer/
 LinearExplainer call, same top-20-by-mean|SHAP| display, same codebook labels),
 and places both beeswarms in one figure via plt.sca() before each
@@ -21,7 +21,7 @@ computing SHAP values.
 Run with the same interpreter the notebooks used:
     ~/.pyenv/versions/3.11.9/bin/python build_cross_cohort_shap_summary_overlay.py
 """
-import os, re, ast, sys, json
+import os, re, ast, sys, json, contextlib, io
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -49,9 +49,9 @@ COHORTS = [
     ("Age 50-64", "CB_50-64.ipynb"),
     ("Age 65+", "CB_65+.ipynb"),
 ]
-DATA_CELL = 37                      # cell that defines X_train/X_test/y_train/y_test/w_test_arr/
-                                     # feature_cols, make_imputer, make_scaler (cell 28) and
-                                     # SCALE_POS_WEIGHT + cv (cell 37); cell 39's Optuna run is skipped
+# Execute only the cells needed to reconstruct the modeling frame. Avoid a
+# positional slice because notebook cell 34 is the expensive Optuna search.
+PIPELINE_CELLS = (2, 4, 5, 7, 9, 13, 15, 16, 25, 28, 32)
 SHAP_MAX_DISPLAY = 15                # top-15 (notebook cell 54 uses 20; this figure intentionally trims to 15)
 OUT_BASENAME = os.path.join(HERE, "cross_cohort_shap_summary_overlay")
 
@@ -61,10 +61,12 @@ OUT_BASENAME = os.path.join(HERE, "cross_cohort_shap_summary_overlay")
 LABEL_OVERRIDES = {
     "Daily brushing frequency (count)": "Daily brushing frequency",
     "Diabetes (diagnosed or HbA1c ≥ 6.5%)": "Diabetes",
-    "Dong/Eup-Myeon classification": "Urban/Rural",
+    "Dong/Eup-Myeon classification": "City/countryside",
+    "Housing type: Apartment": "Dwelling type: apartment",
     "Estimated kidney function (eGFR, CKD-EPI)": "eGFR",
     "Frequency of fruit intake, past year": "Freq. fruit intake",
-    "Current smoking rate indicator": "Current smoking rate",
+    "Current smoking rate indicator": "Current smoking",
+    "Final diastolic BP": "Diastolic blood pressure",
 }
 
 
@@ -138,9 +140,11 @@ def run_cohort(label, nbfile):
     _real_show = plt.show
     plt.show = lambda *a, **k: None                       # notebook cells call plt.show()
     try:
-        for c in nb["cells"][:DATA_CELL + 1]:
-            if c["cell_type"] == "code":
-                exec("".join(c["source"]), ns)
+        with contextlib.redirect_stdout(io.StringIO()):
+            for i in PIPELINE_CELLS:
+                c = nb["cells"][i]
+                if c["cell_type"] == "code":
+                    exec("".join(c["source"]), ns)
     finally:
         plt.show = _real_show
         plt.close("all")

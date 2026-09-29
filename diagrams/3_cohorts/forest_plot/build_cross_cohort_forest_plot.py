@@ -1,25 +1,19 @@
 """
-Cross-Cohort Forest Plot — SHAP-Informed Confirmatory Model (Figure 5)
+Cross-Cohort Forest Plot — SHAP-Ranked Features in the Prespecified Model
 =============================================================================
-Adjusted odds ratios (aOR) with 95% CI from the SHAP-informed confirmatory
-survey-weighted logistic regression (notebook §9.12), for the 50+, 50-64, and
-65+ cohorts, dodged on shared rows for direct side-by-side comparison.
+Adjusted odds ratios (aORs) with 95% CIs from each cohort's full prespecified
+survey-weighted logistic regression, displayed for the union of the 15 features
+with the highest survey-weighted mean absolute SHAP contribution in that cohort.
 
-Formerly built from the PRE-SPECIFIED model (§11.3), which used an identical,
-theory-driven 18-covariate set in both cohorts. §11.3 has been removed; the
-SHAP-informed model is data-driven per cohort (top-N by mean(|SHAP|), see
-notebook TOP_N_SHAP), so the cohorts' selected variables are NOT guaranteed
-to match. This script plots the UNION of all cohorts' selected variables,
-grouped by how many of the three cohorts selected each variable (ALL 3 /
-IN 2 OF 3 / SINGLE COHORT): a row with fewer than three markers means that
-variable was selected into only some cohorts' models -- it is not a missing
-data point, the other cohort(s)' model simply never estimated a coefficient
-for it.
+The full regression contains the same 43 predictor concepts in every cohort;
+SHAP is used only to decide which estimates to display. Rows are grouped by
+whether a feature appears in all three, two, or one cohort's top-15 SHAP list.
+A row with fewer than three markers therefore means that the feature was not in
+the other cohort's top-15 list, not that it was omitted from that regression.
 
-Why a separate script (not a notebook cell): each notebook only prints its own
-cohort's aOR table (no re-fitting needed -- the svyglm output is already saved
-as text in the notebook, so this script just parses it and plots; it does not
-re-run the R/rpy2 pipeline).
+Why a separate script (not a notebook cell): each notebook prints its own full
+survey-weighted aOR table and its own weighted SHAP ranking. This script parses
+those saved outputs and combines them without re-fitting the R/rpy2 models.
 
 Elsevier artwork spec targeted (same as the calibration-curve companion
 figure -- general Elsevier artwork instructions, no Journal of Dentistry
@@ -53,6 +47,13 @@ OUT_BASENAME = os.path.join(HERE, "cross_cohort_forest_plot")
 # in the inferential model, so these overrides belong in the forest plot rather
 # than the shared SHAP/codebook label resolver.
 FOREST_LABEL_OVERRIDES = {
+    "sex_female": "Female sex",
+    "sm_presnt": "Current smoking",
+    "O_pain": "Toothache",
+    "town_t": "City/countryside",
+    "live_t_2": "Dwelling type: apartment",
+    "HE_dbp": "Diastolic blood pressure (per 1 mmHg)",
+    "LS_FRUIT": "Fruit intake frequency",
     "N_CA": "Daily total calcium (per 100 mg)",
     "N_NA": "Sodium intake (per 1,000 mg)",
     "BD1": "Lifetime alcohol drinking experience",
@@ -63,7 +64,7 @@ FOREST_LABEL_OVERRIDES = {
 
 
 def forest_label(name):
-    return FOREST_LABEL_OVERRIDES.get(name, label_for(name))
+    return FOREST_LABEL_OVERRIDES[name] if name in FOREST_LABEL_OVERRIDES else label_for(name)
 
 
 def cell_output_text(cell):
@@ -77,26 +78,36 @@ def cell_output_text(cell):
 
 
 _ROW_RE = re.compile(r"^(\S+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)")
+TOP_N_SHAP = 15
+SHAP_TO_REGRESSION = {
+    "sex": "sex_female",
+}
 
 
 def parse_shap_table(nbfile):
-    """Parse §9.12's printed 'SHAP-informed confirmatory model' table: name,
-    aOR, CI 2.5%, CI 97.5%, p-value (ignoring the trailing Holm p / BH q /
-    Survives columns, which the old pre-specified table didn't have)."""
+    """Parse the weighted SHAP top 15 and the full survey-weighted aOR table."""
     nb = json.load(open(os.path.join(MAIN, nbfile)))
+    shap_text = next((cell_output_text(c) for c in nb["cells"]
+                      if "features by survey-weighted mean |SHAP|" in cell_output_text(c)), None)
+    assert shap_text is not None, \
+        f"{nbfile}: no saved survey-weighted SHAP ranking -- rerun the SHAP summary cell"
+    ranked = []
+    for line in shap_text.split("\n"):
+        m = re.match(r"\s*(\d+)\.\s+(\S+)\s+[-\d.]+", line)
+        if m and int(m.group(1)) <= TOP_N_SHAP:
+            ranked.append(SHAP_TO_REGRESSION.get(m.group(2), m.group(2)))
+    assert len(ranked) == TOP_N_SHAP, \
+        f"{nbfile}: expected {TOP_N_SHAP} weighted SHAP features, found {len(ranked)}"
+
     text = next((cell_output_text(c) for c in nb["cells"]
-                 if "SHAP-informed confirmatory model" in cell_output_text(c)), None)
+                 if "=== Adjusted odds ratios (survey::svyglm" in cell_output_text(c)), None)
     assert text is not None, \
-        f"{nbfile}: no cell output contains the SHAP-informed confirmatory model table " \
-        "-- rerun §9.9-9.12 in this notebook first"
+        f"{nbfile}: no saved full survey-weighted regression table -- rerun §11"
 
     n_match = re.search(r"Complete-case n = (\d+)\s*\|\s*tooth-loss prevalence = ([\d.]+)%", text)
     n_complete, prevalence = int(n_match.group(1)), float(n_match.group(2))
 
-    top_n_match = re.search(r"Top (\d+) SHAP-ranked variables", text)
-    top_n = int(top_n_match.group(1)) if top_n_match else None
-
-    rows = {}
+    all_rows = {}
     in_table = False
     for line in text.split("\n"):
         if line.strip().startswith("aOR"):
@@ -110,9 +121,11 @@ def parse_shap_table(nbfile):
         name, aor, lo, hi, p = m.groups()
         if name == "(Intercept)":
             continue
-        rows[name] = dict(aOR=float(aor), lo=float(lo), hi=float(hi), p=float(p))
-    assert rows, f"{nbfile}: found the SHAP-informed model header but parsed zero variable rows"
-    return rows, n_complete, prevalence, top_n
+        all_rows[name] = dict(aOR=float(aor), lo=float(lo), hi=float(hi), p=float(p))
+    missing = [name for name in ranked if name not in all_rows]
+    assert not missing, f"{nbfile}: top-15 SHAP terms absent from the regression table: {missing}"
+    rows = {name: all_rows[name] for name in ranked}
+    return rows, n_complete, prevalence, TOP_N_SHAP
 
 
 def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
@@ -282,8 +295,8 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
     ax.set_xlabel("Adjusted odds ratio (95% CI), log scale")
     topn_str = " / ".join(f"top-{topn_by_label[label] or '?'} ({label})" for label in labels)
     ax.set_title(
-        "Adjusted odds ratios — SHAP-informed confirmatory model, by age cohort\n"
-        f"union of {topn_str} SHAP-selected predictors",
+        "Adjusted odds ratios from the prespecified survey-weighted model, by age cohort\n"
+        f"union of {topn_str} survey-weighted SHAP-ranked features",
         fontsize=14, loc="left", pad=6)
     for s in ("top", "right", "left"):
         ax.spines[s].set_visible(False)
@@ -313,7 +326,7 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
                      ncol=3, frameon=True, framealpha=0.92,
                      fontsize=10.5, handlelength=1.5, borderpad=0.6, columnspacing=1.2)
     leg.get_frame().set_linewidth(0.5)
-    footnote = "Fewer than all markers on a row = selected into only some cohorts' SHAP-informed models"
+    footnote = "Fewer than all markers on a row = feature appeared in only some cohorts' top-15 SHAP rankings"
     if mode == "clip":
         footnote += "  |  arrow markers = point estimate off the shared axis, exact aOR (95% CI) printed alongside"
     fig.text(0.5, 0.01, footnote, ha="center", va="bottom", fontsize=9.5,
