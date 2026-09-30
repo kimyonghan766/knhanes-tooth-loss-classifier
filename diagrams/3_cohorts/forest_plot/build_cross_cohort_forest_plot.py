@@ -40,7 +40,7 @@ COHORTS = [
     ("65+",    "CB_65+.ipynb",    "#D62728", "s"),
 ]
 MM_PER_IN = 25.4
-FIG_WIDTH_MM = 246.2                # A4 landscape width (297mm) minus 1in (25.4mm) margins each side
+FIG_WIDTH_MM = 285.0                # wider canvas so the log-aOR axis has more horizontal resolution
 OUT_BASENAME = os.path.join(HERE, "cross_cohort_forest_plot")
 
 # Regression-specific display units/contrasts. N_CA and N_NA are rescaled only
@@ -48,14 +48,16 @@ OUT_BASENAME = os.path.join(HERE, "cross_cohort_forest_plot")
 # than the shared SHAP/codebook label resolver.
 FOREST_LABEL_OVERRIDES = {
     "sex_female": "Female sex",
+    "diabetes": "Diabetes",
     "sm_presnt": "Current smoking",
     "O_pain": "Toothache",
     "town_t": "City/countryside",
     "live_t_2": "Dwelling type: apartment",
-    "HE_dbp": "Diastolic blood pressure (per 1 mmHg)",
+    "HE_dbp": "Diastolic BP",
+    "eGFR": "eGFR",
     "LS_FRUIT": "Fruit intake frequency",
-    "N_CA": "Daily total calcium (per 100 mg)",
-    "N_NA": "Sodium intake (per 1,000 mg)",
+    "N_CA": "Daily total calcium",
+    "N_NA": "Sodium Intake",
     "BD1": "Lifetime alcohol drinking experience",
     "L_BR_FQ_2": "Breakfast 3–4×/week vs 5–7×/week",
     "L_BR_FQ_3": "Breakfast 1–2×/week vs 5–7×/week",
@@ -196,8 +198,13 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
             header_rows.append((y, val))
         else:
             var_y[val] = y
-    dodge_step = 0.32                   # doubled from 0.16 -- wider gap between the 3 cohorts' markers per row
+    dodge_step = 0.32                   # vertical gap between the 3 cohorts' markers per row
+    callout_dodge_step = 0.55           # extra separation for multi-line off-scale annotations
     offsets = {label: (i - (n_cohorts - 1) / 2) * dodge_step for i, label in enumerate(labels)}
+    callout_offsets = {
+        label: (i - (n_cohorts - 1) / 2) * callout_dodge_step
+        for i, label in enumerate(labels)
+    }
 
     # ── Block shading (Both cohorts / cohort-A-only / cohort-B-only), header row
     # included in its own block's band ──────────────────────────────────────────
@@ -254,6 +261,9 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
             significant = r["p"] < 0.05
 
             if (label, varname) in outliers:
+                # Text callouts need more vertical clearance than compact markers.
+                # This keeps multiple off-scale estimates on distinct readable lines.
+                y = var_y[varname] + callout_offsets[label]
                 edge = xlim[0] if r["aOR"] < xlim[0] else xlim[1]
                 txt_x, ha = (edge * 1.06, "left") if edge == xlim[0] else (edge * 0.94, "right")
                 label_txt = f"{r['aOR']:.2f} ({r['lo']:.2f}–{r['hi']:.2f})"
@@ -285,19 +295,17 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
     ax.set_xticklabels([f"{t:g}" for t in ticks])
     ax.set_yticks(all_y)
     tick_labels = [name if kind == "header" else forest_label(name) for kind, name in render_items]
-    ax.set_yticklabels(tick_labels, fontsize=11.5)
+    # Slightly larger than the cross-cohort SHAP labels for readability in this
+    # single-panel figure; shared by feature labels, group headings, and legend.
+    label_fontsize = 11
+    ax.set_yticklabels(tick_labels, fontsize=label_fontsize)
     for y, _ in header_rows:
         tick = ax.yaxis.get_ticklabels()[list(all_y).index(y)]
         tick.set_fontweight("bold")
-        tick.set_fontsize(12.0)
+        tick.set_fontsize(label_fontsize)
         tick.set_color("#333333")
     ax.set_ylim(-0.5 * ROW_SPACING, (n_items - 0.5) * ROW_SPACING)
     ax.set_xlabel("Adjusted odds ratio (95% CI), log scale")
-    topn_str = " / ".join(f"top-{topn_by_label[label] or '?'} ({label})" for label in labels)
-    ax.set_title(
-        "Adjusted odds ratios from the prespecified survey-weighted model, by age cohort\n"
-        f"union of {topn_str} survey-weighted SHAP-ranked features",
-        fontsize=14, loc="left", pad=6)
     for s in ("top", "right", "left"):
         ax.spines[s].set_visible(False)
     ax.tick_params(axis="y", length=0)
@@ -306,14 +314,14 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
     from matplotlib.lines import Line2D
     legend_elems = [
         Line2D([0], [0], marker=markers[label], color=colors[label], linestyle="",
-              markersize=4.5, markerfacecolor=colors[label],
+              markersize=6.5, markerfacecolor=colors[label],
               label=f"{label}  (n={n_by_label[label]:,}, prevalence {prev_by_label[label]:.1f}%)")
         for label in labels
     ] + [
         Line2D([0], [0], marker="o", color="#555555", linestyle="",
-              markersize=4.5, markerfacecolor="#555555", label="Filled = p < 0.05"),
+              markersize=6.5, markerfacecolor="#555555", label="Filled = p < 0.05"),
         Line2D([0], [0], marker="o", color="#555555", linestyle="",
-              markersize=4.5, markerfacecolor="white", markeredgewidth=0.8,
+              markersize=6.5, markerfacecolor="white", markeredgewidth=0.9,
               label="Open = not significant"),
     ]
     # Legend moved OFF the data area (was "upper right" inside the axes, which sat
@@ -321,16 +329,12 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
     # oral health" / "Current smoking rate indicator" -- whenever their CIs reached
     # into the plot's upper-right corner). A figure-level legend below the x-axis
     # can never collide with a data row, regardless of which rows have the widest CIs.
-    plt.tight_layout(rect=[0, 0.12, 1, 1])
-    leg = fig.legend(handles=legend_elems, loc="lower center", bbox_to_anchor=(0.5, 0.055),
+    plt.tight_layout(rect=[0, 0.10, 1, 1])
+    leg = fig.legend(handles=legend_elems, loc="lower center", bbox_to_anchor=(0.5, 0.018),
                      ncol=3, frameon=True, framealpha=0.92,
-                     fontsize=10.5, handlelength=1.5, borderpad=0.6, columnspacing=1.2)
+                     fontsize=label_fontsize, handlelength=1.7, borderpad=0.75, columnspacing=1.5,
+                     labelspacing=0.75)
     leg.get_frame().set_linewidth(0.5)
-    footnote = "Fewer than all markers on a row = feature appeared in only some cohorts' top-15 SHAP rankings"
-    if mode == "clip":
-        footnote += "  |  arrow markers = point estimate off the shared axis, exact aOR (95% CI) printed alongside"
-    fig.text(0.5, 0.01, footnote, ha="center", va="bottom", fontsize=9.5,
-             color="#777777", style="italic")
 
     out_base = OUT_BASENAME + out_suffix
     fig.savefig(out_base + ".png", bbox_inches="tight", dpi=600)
