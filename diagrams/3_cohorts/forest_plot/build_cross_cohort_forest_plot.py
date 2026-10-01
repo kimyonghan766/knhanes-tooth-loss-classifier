@@ -3,7 +3,7 @@ Cross-Cohort Forest Plot — SHAP-Ranked Features in the Prespecified Model
 =============================================================================
 Adjusted odds ratios (aORs) with 95% CIs from each cohort's full prespecified
 survey-weighted logistic regression, displayed for the union of the 15 features
-with the highest survey-weighted mean absolute SHAP contribution in that cohort.
+with the highest unweighted mean absolute SHAP contribution in that cohort.
 
 The full regression contains the same 43 predictor concepts in every cohort;
 SHAP is used only to decide which estimates to display. Rows are grouped by
@@ -12,8 +12,10 @@ A row with fewer than three markers therefore means that the feature was not in
 the other cohort's top-15 list, not that it was omitted from that regression.
 
 Why a separate script (not a notebook cell): each notebook prints its own full
-survey-weighted aOR table and its own weighted SHAP ranking. This script parses
-those saved outputs and combines them without re-fitting the R/rpy2 models.
+survey-weighted aOR table and its own unweighted SHAP ranking. This script parses
+those saved outputs and combines them without re-fitting the R/rpy2 models. If
+the notebook outputs predate the unweighted ranking change, the script rebuilds
+only the pinned CatBoost SHAP rankings; it still reads the saved R regression.
 
 Elsevier artwork spec targeted (same as the calibration-curve companion
 figure -- general Elsevier artwork instructions, no Journal of Dentistry
@@ -21,7 +23,7 @@ override found): combination art >= 500 dpi, double-column width 190 mm
 (this is a primary results figure, so double- rather than single-column),
 ~7 pt lettering at final printed size.
 """
-import os, re, json, sys
+import os, re, json, sys, importlib.util
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -40,7 +42,8 @@ COHORTS = [
     ("65+",    "CB_65+.ipynb",    "#D62728", "s"),
 ]
 MM_PER_IN = 25.4
-FIG_WIDTH_MM = 285.0                # wider canvas so the log-aOR axis has more horizontal resolution
+FIG_WIDTH_MM = 345.0                # deliberately wide landscape presentation
+FIG_HEIGHT_MM = 218.0               # fixed height keeps the figure horizontally stretched
 OUT_BASENAME = os.path.join(HERE, "cross_cohort_forest_plot")
 
 # Regression-specific display units/contrasts. N_CA and N_NA are rescaled only
@@ -86,20 +89,23 @@ SHAP_TO_REGRESSION = {
 }
 
 
-def parse_shap_table(nbfile):
-    """Parse the weighted SHAP top 15 and the full survey-weighted aOR table."""
+def parse_shap_table(nbfile, ranked_override=None):
+    """Parse the unweighted SHAP top 15 and the full survey-weighted aOR table."""
     nb = json.load(open(os.path.join(MAIN, nbfile)))
-    shap_text = next((cell_output_text(c) for c in nb["cells"]
-                      if "features by survey-weighted mean |SHAP|" in cell_output_text(c)), None)
-    assert shap_text is not None, \
-        f"{nbfile}: no saved survey-weighted SHAP ranking -- rerun the SHAP summary cell"
-    ranked = []
-    for line in shap_text.split("\n"):
-        m = re.match(r"\s*(\d+)\.\s+(\S+)\s+[-\d.]+", line)
-        if m and int(m.group(1)) <= TOP_N_SHAP:
-            ranked.append(SHAP_TO_REGRESSION.get(m.group(2), m.group(2)))
+    if ranked_override is None:
+        shap_text = next((cell_output_text(c) for c in nb["cells"]
+                          if "features by unweighted mean |SHAP|" in cell_output_text(c)), None)
+        assert shap_text is not None, \
+            f"{nbfile}: no saved unweighted SHAP ranking -- rerun the SHAP summary cell"
+        ranked = []
+        for line in shap_text.split("\n"):
+            m = re.match(r"\s*(\d+)\.\s+(\S+)\s+[-\d.]+", line)
+            if m and int(m.group(1)) <= TOP_N_SHAP:
+                ranked.append(SHAP_TO_REGRESSION.get(m.group(2), m.group(2)))
+    else:
+        ranked = [SHAP_TO_REGRESSION.get(name, name) for name in ranked_override]
     assert len(ranked) == TOP_N_SHAP, \
-        f"{nbfile}: expected {TOP_N_SHAP} weighted SHAP features, found {len(ranked)}"
+        f"{nbfile}: expected {TOP_N_SHAP} unweighted SHAP features, found {len(ranked)}"
 
     text = next((cell_output_text(c) for c in nb["cells"]
                  if "=== Adjusted odds ratios (survey::svyglm" in cell_output_text(c)), None)
@@ -128,6 +134,25 @@ def parse_shap_table(nbfile):
     assert not missing, f"{nbfile}: top-15 SHAP terms absent from the regression table: {missing}"
     rows = {name: all_rows[name] for name in ranked}
     return rows, n_complete, prevalence, TOP_N_SHAP
+
+
+def recompute_unweighted_rankings():
+    """Rebuild top-15 SHAP lists when notebook outputs have not yet been refreshed."""
+    builder_path = os.path.join(
+        HERE, "..", "shap_summary", "build_cross_cohort_shap_summary_overlay.py"
+    )
+    spec = importlib.util.spec_from_file_location("cross_cohort_shap_builder", builder_path)
+    builder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(builder)
+
+    # Return raw feature names rather than display labels so they match regression terms.
+    builder.label_list = lambda names: list(names)
+    builder.LABEL_OVERRIDES = {}
+    notebook_to_ranking = {}
+    for label, nbfile in builder.COHORTS:
+        result = builder.run_cohort(label, nbfile)
+        notebook_to_ranking[nbfile] = result["names"][:TOP_N_SHAP]
+    return notebook_to_ranking
 
 
 def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
@@ -188,7 +213,7 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
     ROW_SPACING = 1.3                   # extra vertical gap between rows, to keep clearance
                                          # around the wider per-row marker dodge below
     fig_w = FIG_WIDTH_MM / MM_PER_IN
-    fig_h = fig_w * (0.20 + 0.030 * n_items * ROW_SPACING)     # scales with row count (union size varies run to run)
+    fig_h = FIG_HEIGHT_MM / MM_PER_IN
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
     all_y = np.arange(n_items)[::-1] * ROW_SPACING
@@ -295,14 +320,15 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
     ax.set_xticklabels([f"{t:g}" for t in ticks])
     ax.set_yticks(all_y)
     tick_labels = [name if kind == "header" else forest_label(name) for kind, name in render_items]
-    # Slightly larger than the cross-cohort SHAP labels for readability in this
-    # single-panel figure; shared by feature labels, group headings, and legend.
-    label_fontsize = 11
-    ax.set_yticklabels(tick_labels, fontsize=label_fontsize)
+    # Larger, medium-weight feature labels for manuscript-scale readability; the
+    # three cohort-group headings are promoted to full bold immediately below.
+    label_fontsize = 13
+    legend_fontsize = 11.5
+    ax.set_yticklabels(tick_labels, fontsize=label_fontsize, fontweight="medium")
     for y, _ in header_rows:
         tick = ax.yaxis.get_ticklabels()[list(all_y).index(y)]
         tick.set_fontweight("bold")
-        tick.set_fontsize(label_fontsize)
+        tick.set_fontsize(label_fontsize + 0.3)
         tick.set_color("#333333")
     ax.set_ylim(-0.5 * ROW_SPACING, (n_items - 0.5) * ROW_SPACING)
     ax.set_xlabel("Adjusted odds ratio (95% CI), log scale")
@@ -329,10 +355,10 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
     # oral health" / "Current smoking rate indicator" -- whenever their CIs reached
     # into the plot's upper-right corner). A figure-level legend below the x-axis
     # can never collide with a data row, regardless of which rows have the widest CIs.
-    plt.tight_layout(rect=[0, 0.10, 1, 1])
-    leg = fig.legend(handles=legend_elems, loc="lower center", bbox_to_anchor=(0.5, 0.018),
+    fig.subplots_adjust(left=0.275, right=0.985, top=0.985, bottom=0.205)
+    leg = fig.legend(handles=legend_elems, loc="lower center", bbox_to_anchor=(0.5, 0.012),
                      ncol=3, frameon=True, framealpha=0.92,
-                     fontsize=label_fontsize, handlelength=1.7, borderpad=0.75, columnspacing=1.5,
+                     fontsize=legend_fontsize, handlelength=1.7, borderpad=0.75, columnspacing=1.5,
                      labelspacing=0.75)
     leg.get_frame().set_linewidth(0.5)
 
@@ -343,9 +369,22 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
 
 
 if __name__ == "__main__":
+    saved_rankings_current = True
+    for _, nbfile, _, _ in COHORTS:
+        nb = json.load(open(os.path.join(MAIN, nbfile)))
+        if not any("features by unweighted mean |SHAP|" in cell_output_text(c)
+                   for c in nb["cells"]):
+            saved_rankings_current = False
+            break
+    ranking_overrides = {} if saved_rankings_current else recompute_unweighted_rankings()
+    if ranking_overrides:
+        print("Notebook SHAP outputs are stale; using freshly recomputed unweighted rankings.")
+
     cohort_data_lookup = {}
     for label, nbfile, color, marker in COHORTS:
-        rows, n_complete, prevalence, top_n = parse_shap_table(nbfile)
+        rows, n_complete, prevalence, top_n = parse_shap_table(
+            nbfile, ranking_overrides.get(nbfile)
+        )
         cohort_data_lookup[label] = (rows, n_complete, prevalence, top_n)
         print(f"[{label}] parsed {len(rows)} rows from {nbfile}  "
               f"(n_complete={n_complete}, prevalence={prevalence:.1f}%, TOP_N_SHAP={top_n})")

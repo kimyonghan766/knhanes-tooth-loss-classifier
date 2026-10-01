@@ -183,20 +183,21 @@ def run_cohort(label, nbfile):
                        else (sv_raw[1] if isinstance(sv_raw, list) else sv_raw))
 
     # ── Every feature competes on equal footing. Select and order the displayed
-    # rows by survey-weighted mean |SHAP|, then disable summary_plot's internal unweighted
-    # sorting so the figure uses the same population-weighted ranking as the saved arrays.
+    # rows by the conventional unweighted mean |SHAP| across test observations, matching
+    # the notebooks' unweighted model-fitting and selection pipeline. Disable
+    # summary_plot's internal sorting so this explicit ordering is preserved.
     feature_cols = ns["feature_cols"]
-    mean_abs_weighted = np.average(np.abs(shap_values), axis=0, weights=w)
-    weighted_top_idx = np.argsort(mean_abs_weighted)[::-1][:SHAP_MAX_DISPLAY]
-    weighted_top_features = [feature_cols[i] for i in weighted_top_idx]
-    names = [LABEL_OVERRIDES.get(n, n) for n in label_list(weighted_top_features)]
+    mean_abs_shap = np.abs(shap_values).mean(axis=0)
+    top_idx = np.argsort(mean_abs_shap)[::-1][:SHAP_MAX_DISPLAY]
+    top_features = [feature_cols[i] for i in top_idx]
+    names = [LABEL_OVERRIDES.get(n, n) for n in label_list(top_features)]
 
     print(f"[{label}] {best_name}: AUPRC {ap:.4f} (reported {reported_ap:.4f})  "
           f"AUC {auc:.4f} (reported {reported_auc:.4f})  "
           f"shap_values {shap_values.shape}  features {len(feature_cols)}")
     return dict(label=label, model=best_name,
-                shap_values=shap_values[:, weighted_top_idx],
-                X=X_test_imp[:, weighted_top_idx], names=names)
+                shap_values=shap_values[:, top_idx],
+                X=X_test_imp[:, top_idx], names=names)
 
 
 def plot(results):
@@ -217,7 +218,7 @@ def plot(results):
         n_axes_before = len(fig.axes)
         shap.summary_plot(r["shap_values"], r["X"], feature_names=r["names"], show=False,
                           max_display=SHAP_MAX_DISPLAY,
-                          sort=False,       # preserve survey-weighted mean-|SHAP| ordering
+                          sort=False,       # preserve unweighted mean-|SHAP| ordering
                           plot_size=None)          # None = don't let shap override our figsize
         ax.tick_params(axis="y", labelsize=LABEL_FONTSIZE)
         ax.tick_params(axis="x", labelsize=LABEL_FONTSIZE)
