@@ -7,9 +7,9 @@ cohorts on the same axes -- 50+ in blue, 50-64 in orange, 65+ in red (the
 common pinned CatBoost model). Both panels reuse the notebooks' algorithms
 verbatim (cells 54, 80, 84-85 of Main/CB_50+.ipynb / CB_50-64.ipynb / CB_65+.ipynb):
 
-  - Calibration: out-of-fold (OOF) train-set probabilities for ALL 5 tuned
-    models -> unpenalised Platt scaling (logistic regression on the logit of
-    the OOF probabilities, C=inf) -> apply to the TEST set -> 10-bin
+  - Calibration: the development-fitted Platt slope and intercept saved by each
+    revised notebook from tuning-independent nested OOF predictions -> apply to
+    the TEST set -> 10-bin
     calibration curve on the common CatBoost model's recalibrated probabilities. A 95%
     CI band is added around this by bootstrapping the FIXED (y_test,
     recalibrated proba, wt_itvex) values 2000 times by PSU within stratum
@@ -23,20 +23,17 @@ verbatim (cells 54, 80, 84-85 of Main/CB_50+.ipynb / CB_50-64.ipynb / CB_65+.ipy
     cohort prevalence) and "Treat none" (0 for both) reference lines. No
     bootstrap band on this panel.
 
-Why a separate script (not a notebook cell): each notebook only computes
-its own cohort's OOF probabilities / Platt scaling / DCA. Re-running the
-notebooks' Optuna hyperparameter search (cell 49, 50 trials x 5 models)
-would be needlessly expensive, so this script recovers each model's
-ALREADY-TUNED best_params from the notebook's saved Optuna print lines
-(cell 49's output text) and reproduces cell 54's OOF loop, cell 80's Platt
-scaling, and cells 84-85's DCA exactly, without re-searching.
+Why a separate script (not a notebook cell): each notebook only plots its own
+cohort. Re-running the notebooks' nested Optuna searches would be needlessly
+expensive, so this script recovers the final CatBoost best_params and the
+nested-OOF Platt mapping coefficients from the notebooks' saved outputs. It
+then reproduces the test-set calibration and DCA without re-searching.
 
 Faithfulness: each notebook uses a deterministic temporal split (train
-2020-2023, test 2024), fixed random_state=42, and a fixed 5-fold
-StratifiedKFold(shuffle=True, random_state=42) for OOF (cell 47's `cv`),
-so the recomputed common-model Test AUPRC/AUC must equal the values the
-notebook reports, and the recovered pinned model name must match. The
-script asserts both before drawing.
+2020-2023, test 2024) and fixed random_state=42. The recomputed common-model
+Test AUPRC/AUC must equal the values the notebook reports, and the recovered
+pinned model name and Platt mapping must exist. The script asserts these
+conditions before drawing.
 
 Run with the same interpreter the notebooks used:
     ~/.pyenv/versions/3.11.9/bin/python build_calibration_dca_overlay.py
@@ -50,7 +47,6 @@ import matplotlib.pyplot as plt
 from sklearn.pipeline import Pipeline
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import cross_val_predict
 from sklearn.metrics import average_precision_score, roc_auc_score
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
@@ -67,9 +63,17 @@ COHORTS = [
     ("50-64",  "CB_50-64.ipynb",  "#E69F00"),
     ("65+",    "CB_65+.ipynb",    "#D62728"),
 ]
-# Execute only the cells needed to reconstruct the modeling frame. Avoid a
-# positional slice because notebook cell 34 is the expensive Optuna search.
-PIPELINE_CELLS = (2, 4, 5, 7, 9, 13, 15, 16, 25, 28, 32)
+# Execute only the cells needed to reconstruct the modeling frame. Resolve them
+# by stable source markers so later notebook insertions cannot shift the builder
+# onto the wrong cells or the expensive nested Optuna search.
+PIPELINE_CELL_MARKERS = (
+    "import numpy as np", "CSV_DIR = '../csv'", "raw_columns = [",
+    "pd.to_numeric(df_subset['O_TC']", "# Disease diagnoses:",
+    "REDUNDANCY_REPRESENTATIVE = {", "_reference_50plus_missingness",
+    "def calculate_egfr", "# Operational diabetes definition:",
+    "from sklearn.impute import SimpleImputer", "from sklearn.pipeline import Pipeline",
+    "import optuna",
+)
 N_BINS = 10                         # matches the notebooks' calibration_curve(..., n_bins=10, strategy='uniform')
 DCA_THRESHOLDS = np.arange(0.01, 0.51, 0.01)   # matches notebook cell 84's dca_thresholds
 N_BOOT_DRAW = 2000                  # bootstrap draws for the calibration curve's 95% CI band
@@ -89,7 +93,17 @@ def cell_output_text(cell):
     return "\n".join(out)
 
 
-def recover_best_and_all_params(nb):
+def pipeline_cells(nb):
+    code_cells = [c for c in nb["cells"] if c["cell_type"] == "code"]
+    resolved = []
+    for marker in PIPELINE_CELL_MARKERS:
+        matches = [c for c in code_cells if marker in "".join(c.get("source", []))]
+        assert matches, f"required pipeline cell marker not found: {marker!r}"
+        resolved.append(matches[0])
+    return resolved
+
+
+def recover_best_params_and_platt(nb):
     """Pinned model name + reported Test AUPRC/AUC (from cell 44's printed summary line),
     and every tuned model's best_params + CV AUPRC (from cell 39's printed lines) --
     all read live from the notebook's saved outputs, never re-searched. The _catboost
@@ -111,7 +125,35 @@ def recover_best_and_all_params(nb):
         if m:
             params_by_model[m.group(1).strip()] = ast.literal_eval(m.group(2))
     assert best_name in params_by_model, f"best model {best_name!r} missing from parsed params"
-    return best_name, reported_ap, reported_auc, params_by_model
+
+    calibration_txt = next(
+        cell_output_text(c) for c in nb["cells"]
+        if "Development-fitted Platt mapping" in cell_output_text(c)
+    )
+    platt_by_model = {}
+    for name in params_by_model:
+        for line in calibration_txt.split("\n"):
+            m = re.match(rf"^{re.escape(name)}\s+(-?[\d.]+)\s+(-?[\d.]+)\s+", line.strip())
+            if m:
+                platt_by_model[name] = (float(m.group(1)), float(m.group(2)))
+                break
+    assert best_name in platt_by_model, \
+        f"pinned model {best_name!r} missing from saved Platt mapping table"
+    dca_txt = next(
+        cell_output_text(c) for c in nb["cells"]
+        if "threshold" in cell_output_text(c) and "Random Forest" in cell_output_text(c)
+        and "CatBoost" in cell_output_text(c) and "none" in cell_output_text(c)
+    )
+    saved_catboost_dca = {}
+    for line in dca_txt.split("\n"):
+        fields = line.split()
+        if len(fields) >= 8 and re.fullmatch(r"0\.\d{2}", fields[0]):
+            # Printed order is threshold, RF, XGBoost, LightGBM, CatBoost, LR, all, none.
+            saved_catboost_dca[float(fields[0])] = float(fields[4])
+    assert len(saved_catboost_dca) == len(DCA_THRESHOLDS), \
+        f"expected {len(DCA_THRESHOLDS)} saved CatBoost DCA rows, found {len(saved_catboost_dca)}"
+    return (best_name, reported_ap, reported_auc, params_by_model[best_name],
+            platt_by_model[best_name], saved_catboost_dca)
 
 
 def build_estimator(name, params, make_imputer, make_scaler, scale_pos_weight):
@@ -133,26 +175,8 @@ def build_estimator(name, params, make_imputer, make_scaler, scale_pos_weight):
     if name == "Logistic Regression":
         return Pipeline([("imputer", make_imputer()), ("scaler", make_scaler()),
                          ("model", LogisticRegression(class_weight="balanced",
-                                                      solver="saga", max_iter=1000, random_state=42, **params))])
+                                                      solver="saga", max_iter=5000, random_state=42, **params))])
     raise ValueError(name)
-
-
-def xgb_oof_proba(params, X_train, y_train, cv, make_imputer, scale_pos_weight_unused):
-    """Mirrors cell 54's _xgb_oof_proba: fold-local scale_pos_weight (XGBoost has no
-    'balanced' string option, so cross_val_predict alone would freeze it at the
-    full-training-set ratio instead of recomputing per fold like the other 4 models)."""
-    _params = {k: v for k, v in params.items() if k != "scale_pos_weight"}
-    oof = np.zeros(len(X_train))
-    for train_idx, val_idx in cv.split(X_train, y_train):
-        X_tr, X_val = X_train.iloc[train_idx], X_train.iloc[val_idx]
-        y_tr = y_train.iloc[train_idx]
-        fold_spw = float((y_tr == 0).sum() / (y_tr == 1).sum())
-        fold_model = Pipeline([("imputer", make_imputer()),
-                               ("model", XGBClassifier(scale_pos_weight=fold_spw,
-                                                        eval_metric="logloss", random_state=42, nthread=1, **_params))])
-        fold_model.fit(X_tr, y_tr)
-        oof[val_idx] = fold_model.predict_proba(X_val)[:, 1]
-    return oof
 
 
 def _logit(p, eps=1e-6):
@@ -197,16 +221,15 @@ def weighted_calibration_curve(y_true, y_prob, weight, n_bins=10):
 
 def run_cohort(label, nbfile, color):
     nb = json.load(open(nbfile))
-    reported_best_name, reported_ap, reported_auc, params_by_model = recover_best_and_all_params(nb)
+    best_name, reported_ap, reported_auc, best_params, platt_mapping, saved_dca = \
+        recover_best_params_and_platt(nb)
     ns = {"__name__": "__nb__"}
     _real_show = plt.show
     plt.show = lambda *a, **k: None
     try:
         with contextlib.redirect_stdout(io.StringIO()):
-            for i in PIPELINE_CELLS:
-                c = nb["cells"][i]
-                if c["cell_type"] == "code":
-                    exec("".join(c["source"]), ns)
+            for c in pipeline_cells(nb):
+                exec("".join(c["source"]), ns)
     finally:
         plt.show = _real_show
         plt.close("all")
@@ -215,46 +238,24 @@ def run_cohort(label, nbfile, color):
     w_test = ns["w_test_arr"]
     make_imputer, make_scaler = ns["make_imputer"], ns["make_scaler"]
     scale_pos_weight = ns["SCALE_POS_WEIGHT"]
-    cv = ns["cv"]                       # StratifiedKFold(n_splits=5, shuffle=True, random_state=42), from cell 47
-
-    # ── Reproduce cell 54: OOF probabilities + fitted model for all 5 tuned models ──
-    fitted_models, oof_proba_by_model, oof_auprc = {}, {}, {}
-    for name, params in params_by_model.items():
-        est = build_estimator(name, params, make_imputer, make_scaler, scale_pos_weight)
-        if name == "XGBoost":
-            oof = xgb_oof_proba(params, X_train, y_train, cv, make_imputer, scale_pos_weight)
-        else:
-            oof = cross_val_predict(est, X_train, y_train, cv=cv, method="predict_proba")[:, 1]
-        oof_proba_by_model[name] = oof
-        oof_auprc[name] = average_precision_score(y_train, oof)
-        est.fit(X_train, y_train)
-        fitted_models[name] = est
-
-    # The _catboost notebooks hard-pin CatBoost for cross-cohort SHAP comparability
-    # (cell 44), overriding the OOF-AUPRC leaderboard -- so use the pinned name from the
-    # notebook's saved output rather than recomputing the OOF winner here (which, for the
-    # 65+ cohort, is Logistic Regression, not the pinned CatBoost). The AUPRC/AUC drift
-    # asserts below still verify the refit pinned model matches the notebook.
-    best_name = reported_best_name
-    assert best_name in fitted_models, \
-        f"{label}: pinned model {best_name!r} not among refit models {list(fitted_models)}"
-    best_model = fitted_models[best_name]
+    # Refit the notebook's common pinned model with its final full-development
+    # hyperparameters. The development Platt mapping itself is read from the saved
+    # nested-OOF calibration output above, so no optimistic ordinary-CV OOF loop is used.
+    best_model = build_estimator(
+        best_name, best_params, make_imputer, make_scaler, scale_pos_weight
+    )
+    best_model.fit(X_train, y_train)
     proba_best_raw = best_model.predict_proba(X_test)[:, 1]
     ap = average_precision_score(y_test, proba_best_raw, sample_weight=w_test)
     auc = roc_auc_score(y_test, proba_best_raw, sample_weight=w_test)
     assert abs(ap - reported_ap) < 0.01, f"{label}: AUPRC {ap:.4f} != reported {reported_ap:.4f}"
     assert abs(auc - reported_auc) < 0.01, f"{label}: AUC {auc:.4f} != reported {reported_auc:.4f}"
 
-    # ── Reproduce cell 80: Platt scaling (unpenalised logistic regression on the
-    # logit of OOF train probabilities), applied to every model's test probabilities ──
-    recal_proba_by_model = {}
-    for name, model in fitted_models.items():
-        proba_raw = model.predict_proba(X_test)[:, 1]
-        recalibrator = LogisticRegression(C=np.inf).fit(
-            _logit(oof_proba_by_model[name]).reshape(-1, 1), y_train)
-        recal_proba_by_model[name] = recalibrator.predict_proba(_logit(proba_raw).reshape(-1, 1))[:, 1]
-
-    proba_best_recal = recal_proba_by_model[best_name]
+    # Apply the exact slope/intercept fitted by the notebook from tuning-independent
+    # nested OOF predictions: sigmoid(intercept + slope * logit(raw probability)).
+    platt_slope, platt_intercept = platt_mapping
+    platt_linear = platt_intercept + platt_slope * _logit(proba_best_raw)
+    proba_best_recal = 1.0 / (1.0 + np.exp(-platt_linear))
     y_test_arr = y_test.to_numpy()
     psu_test = ns["df_subset"].loc[ns["test_mask"], "psu"].to_numpy()
     strata_test = ns["df_subset"].loc[ns["test_mask"], "kstrata"].to_numpy()
@@ -275,20 +276,27 @@ def run_cohort(label, nbfile, color):
     prob_true_mean = true_interp_all.mean(axis=0)
     prob_true_lo, prob_true_hi = np.percentile(true_interp_all, [2.5, 97.5], axis=0)
 
-    # ── Reproduce cells 84-85: DCA on the recalibrated probabilities, all 5 models ──
+    # ── Reproduce the pinned-model DCA on recalibrated probabilities ────────────
     dca_data = pd.DataFrame({"O_TC_": y_test_arr})
-    model_names = list(fitted_models.keys())
-    for name in model_names:
-        dca_data[name] = recal_proba_by_model[name]
-    dca_result = dca(data=dca_data, outcome="O_TC_", modelnames=model_names, thresholds=DCA_THRESHOLDS)
+    dca_data[best_name] = proba_best_recal
+    dca_result = dca(
+        data=dca_data, outcome="O_TC_", modelnames=[best_name],
+        thresholds=DCA_THRESHOLDS
+    )
     dca_table = dca_result.pivot(index="threshold", columns="model", values="net_benefit")
     nb_best = dca_table[best_name].to_numpy()
     nb_all = dca_table["all"].to_numpy()
     nb_none = dca_table["none"].to_numpy()
 
+    dca_drift = max(
+        abs(float(dca_table.loc[t, best_name]) - saved_dca[round(float(t), 2)])
+        for t in DCA_THRESHOLDS
+    )
+    assert dca_drift < 0.002, \
+        f"{label}: regenerated DCA differs from saved notebook output by {dca_drift:.4f}"
     print(f"[{label}] {best_name}: AUPRC {ap:.4f} (reported {reported_ap:.4f})  "
           f"AUC {auc:.4f} (reported {reported_auc:.4f})  n_test {len(y_test)}  "
-          f"n_boot {N_BOOT_DRAW}")
+          f"n_boot {N_BOOT_DRAW}  max saved-DCA drift {dca_drift:.4f}")
     return dict(label=label, model=best_name, color=color,
                 prob_grid=prob_grid, prob_true_mean=prob_true_mean,
                 prob_true_lo=prob_true_lo, prob_true_hi=prob_true_hi,
@@ -340,7 +348,7 @@ def plot(results):
         ax_dca.spines[s].set_visible(False)
 
     fig.suptitle("Cross-cohort calibration & decision-curve analysis — common CatBoost model (2024 test set)",
-                 fontsize=12.5, x=0.01, ha="left")
+                 fontsize=12.5, x=0.5, ha="center")
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(OUT_PNG, dpi=PNG_DPI, bbox_inches="tight")
     print(f"\nWrote {OUT_PNG} ({PNG_DPI} dpi)")

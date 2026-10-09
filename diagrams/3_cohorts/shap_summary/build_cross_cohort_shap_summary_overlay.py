@@ -49,9 +49,17 @@ COHORTS = [
     ("Age 50-64", "CB_50-64.ipynb"),
     ("Age 65+", "CB_65+.ipynb"),
 ]
-# Execute only the cells needed to reconstruct the modeling frame. Avoid a
-# positional slice because notebook cell 34 is the expensive Optuna search.
-PIPELINE_CELLS = (2, 4, 5, 7, 9, 13, 15, 16, 25, 28, 32)
+# Execute only the cells needed to reconstruct the modeling frame. Resolve them
+# by stable source markers so later notebook insertions cannot shift the builder
+# onto the wrong cells or the expensive nested Optuna search.
+PIPELINE_CELL_MARKERS = (
+    "import numpy as np", "CSV_DIR = '../csv'", "raw_columns = [",
+    "pd.to_numeric(df_subset['O_TC']", "# Disease diagnoses:",
+    "REDUNDANCY_REPRESENTATIVE = {", "_reference_50plus_missingness",
+    "def calculate_egfr", "# Operational diabetes definition:",
+    "from sklearn.impute import SimpleImputer", "from sklearn.pipeline import Pipeline",
+    "import optuna",
+)
 SHAP_MAX_DISPLAY = 15                # top-15 (notebook cell 54 uses 20; this figure intentionally trims to 15)
 OUT_BASENAME = os.path.join(HERE, "cross_cohort_shap_summary_overlay")
 
@@ -78,6 +86,16 @@ def cell_output_text(cell):
         elif "data" in o and "text/plain" in o["data"]:
             out.append("".join(o["data"]["text/plain"]))
     return "\n".join(out)
+
+
+def pipeline_cells(nb):
+    code_cells = [c for c in nb["cells"] if c["cell_type"] == "code"]
+    resolved = []
+    for marker in PIPELINE_CELL_MARKERS:
+        matches = [c for c in code_cells if marker in "".join(c.get("source", []))]
+        assert matches, f"required pipeline cell marker not found: {marker!r}"
+        resolved.append(matches[0])
+    return resolved
 
 
 def recover_best(nb):
@@ -129,7 +147,7 @@ def build_estimator(name, params, make_imputer, make_scaler, scale_pos_weight):
         # through unscaled (cell 38).
         return Pipeline([("imputer", make_imputer()), ("scaler", make_scaler()),
                          ("model", LogisticRegression(class_weight="balanced",
-                                                      solver="saga", max_iter=1000, random_state=42, **params))])
+                                                      solver="saga", max_iter=5000, random_state=42, **params))])
     raise ValueError(name)
 
 
@@ -141,10 +159,8 @@ def run_cohort(label, nbfile):
     plt.show = lambda *a, **k: None                       # notebook cells call plt.show()
     try:
         with contextlib.redirect_stdout(io.StringIO()):
-            for i in PIPELINE_CELLS:
-                c = nb["cells"][i]
-                if c["cell_type"] == "code":
-                    exec("".join(c["source"]), ns)
+            for c in pipeline_cells(nb):
+                exec("".join(c["source"]), ns)
     finally:
         plt.show = _real_show
         plt.close("all")

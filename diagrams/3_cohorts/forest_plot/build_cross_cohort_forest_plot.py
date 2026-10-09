@@ -1,7 +1,7 @@
 """
-Cross-Cohort Forest Plot — SHAP-Ranked Features in the Prespecified Model
+Cross-Cohort Forest Plot — SHAP-Ranked Features in the Exploratory Full Model
 =============================================================================
-Adjusted odds ratios (aORs) with 95% CIs from each cohort's full prespecified
+Adjusted odds ratios (aORs) with 95% CIs from each cohort's full exploratory
 survey-weighted logistic regression, displayed for the union of the 15 features
 with the highest unweighted mean absolute SHAP contribution in that cohort.
 
@@ -345,10 +345,11 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
         for label in labels
     ] + [
         Line2D([0], [0], marker="o", color="#555555", linestyle="",
-              markersize=6.5, markerfacecolor="#555555", label="Filled = p < 0.05"),
+              markersize=6.5, markerfacecolor="#555555",
+              label="Filled = nominal unadjusted p < 0.05"),
         Line2D([0], [0], marker="o", color="#555555", linestyle="",
               markersize=6.5, markerfacecolor="white", markeredgewidth=0.9,
-              label="Open = not significant"),
+              label="Open = nominal unadjusted p ≥ 0.05"),
     ]
     # Legend moved OFF the data area (was "upper right" inside the axes, which sat
     # directly on top of the right-hand whiskers of the top rows -- e.g. "Self-rated
