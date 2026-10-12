@@ -59,9 +59,9 @@ os.chdir(MAIN)                      # notebooks read ../csv/ relative to Main/
 
 # label, notebook file, plot colour (Okabe-Ito blue / orange / true red -- validated CVD-safe trio)
 COHORTS = [
-    ("50+",    "CB_50+.ipynb",    "#0072B2"),
-    ("50-64",  "CB_50-64.ipynb",  "#E69F00"),
-    ("65+",    "CB_65+.ipynb",    "#D62728"),
+    ("≥50",    "CB_50+.ipynb",    "#0072B2"),
+    ("50–64",  "CB_50-64.ipynb",  "#E69F00"),
+    ("≥65",    "CB_65+.ipynb",    "#D62728"),
 ]
 # Execute only the cells needed to reconstruct the modeling frame. Resolve them
 # by stable source markers so later notebook insertions cannot shift the builder
@@ -69,7 +69,7 @@ COHORTS = [
 PIPELINE_CELL_MARKERS = (
     "import numpy as np", "CSV_DIR = '../csv'", "raw_columns = [",
     "pd.to_numeric(df_subset['O_TC']", "# Disease diagnoses:",
-    "REDUNDANCY_REPRESENTATIVE = {", "_reference_50plus_missingness",
+    "REDUNDANCY_REPRESENTATIVE = {", "_missingness_excluded = [",
     "def calculate_egfr", "# Operational diabetes definition:",
     "from sklearn.impute import SimpleImputer", "from sklearn.pipeline import Pipeline",
     "import optuna",

@@ -37,9 +37,9 @@ from codebook_labels import label_for
 # label, notebook file, plot colour (blue/orange/red -- validated CVD-safe trio, matches
 # the ROC/PR and calibration/DCA overlay figures), marker shape
 COHORTS = [
-    ("50+",    "CB_50+.ipynb",    "#0072B2", "o"),
-    ("50-64",  "CB_50-64.ipynb",  "#E69F00", "^"),
-    ("65+",    "CB_65+.ipynb",    "#D62728", "s"),
+    ("≥50",    "CB_50+.ipynb",    "#0072B2", "o"),
+    ("50–64",  "CB_50-64.ipynb",  "#E69F00", "^"),
+    ("≥65",    "CB_65+.ipynb",    "#D62728", "s"),
 ]
 MM_PER_IN = 25.4
 FIG_WIDTH_MM = 345.0                # deliberately wide landscape presentation
@@ -54,7 +54,8 @@ FOREST_LABEL_OVERRIDES = {
     "diabetes": "Diabetes",
     "sm_presnt": "Current smoking",
     "O_pain": "Toothache",
-    "town_t": "City/countryside",
+    "town_t": "Urban/rural classification",
+    "brush_freq": "Daily brushing frequency",
     "live_t_2": "Dwelling type: apartment",
     "HE_dbp": "Diastolic BP",
     "eGFR": "eGFR",
@@ -301,8 +302,13 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
                     ax.text(txt_x, y, label_txt, fontsize=9.0, va="center", ha=ha,
                             color=color, style="italic")
                 else:  # mode == "annotate": no marker/whisker on the shared axis at all
-                    ax.text(txt_x, y, f"{label}: aOR {label_txt} — off shared scale",
-                            fontsize=9.0, va="center", ha=ha, color=color, style="italic")
+                    # Lifted ABOVE the row's CI bars by a fixed point offset (layout only), so the
+                    # callout no longer sits on the neighbouring cohort's bar.
+                    ax.annotate(f"{label}: aOR {label_txt} — off shared scale",
+                                xy=(txt_x, y), xytext=(0, 12), textcoords="offset points",
+                                fontsize=9.0, va="center", ha=ha, color=color, style="italic",
+                                bbox=dict(facecolor="white", edgecolor="none", alpha=0.9, pad=0.5),
+                                zorder=10)
                 continue
 
             xerr = [[r["aOR"] - r["lo"]], [r["hi"] - r["aOR"]]]
@@ -346,10 +352,10 @@ def plot(cohort_data, cohort_data_lookup, mode, out_suffix):
     ] + [
         Line2D([0], [0], marker="o", color="#555555", linestyle="",
               markersize=6.5, markerfacecolor="#555555",
-              label="Filled = nominal unadjusted p < 0.05"),
+              label="Filled = nominal unadjusted P < 0.05"),
         Line2D([0], [0], marker="o", color="#555555", linestyle="",
               markersize=6.5, markerfacecolor="white", markeredgewidth=0.9,
-              label="Open = nominal unadjusted p ≥ 0.05"),
+              label="Open = nominal unadjusted P ≥ 0.05"),
     ]
     # Legend moved OFF the data area (was "upper right" inside the axes, which sat
     # directly on top of the right-hand whiskers of the top rows -- e.g. "Self-rated

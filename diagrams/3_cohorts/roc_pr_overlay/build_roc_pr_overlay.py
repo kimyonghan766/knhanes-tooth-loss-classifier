@@ -56,9 +56,9 @@ os.chdir(MAIN)                      # notebooks read ../csv/ relative to Main/
 
 # label, notebook file, plot colour (Okabe-Ito blue / orange / true red -- validated CVD-safe trio)
 COHORTS = [
-    ("50+",    "CB_50+.ipynb",    "#0072B2"),
-    ("50-64",  "CB_50-64.ipynb",  "#E69F00"),
-    ("65+",    "CB_65+.ipynb",    "#D62728"),
+    ("≥50",    "CB_50+.ipynb",    "#0072B2"),
+    ("50–64",  "CB_50-64.ipynb",  "#E69F00"),
+    ("≥65",    "CB_65+.ipynb",    "#D62728"),
 ]
 # Execute only the cells needed to reconstruct the modeling frame. Resolve them
 # by stable source markers so later notebook insertions cannot shift the builder
@@ -66,7 +66,7 @@ COHORTS = [
 PIPELINE_CELL_MARKERS = (
     "import numpy as np", "CSV_DIR = '../csv'", "raw_columns = [",
     "pd.to_numeric(df_subset['O_TC']", "# Disease diagnoses:",
-    "REDUNDANCY_REPRESENTATIVE = {", "_reference_50plus_missingness",
+    "REDUNDANCY_REPRESENTATIVE = {", "_missingness_excluded = [",
     "def calculate_egfr", "# Operational diabetes definition:",
     "from sklearn.impute import SimpleImputer", "from sklearn.pipeline import Pipeline",
     "import optuna",
@@ -269,7 +269,7 @@ def plot(results):
         for fpr_b, tpr_b in r["roc_draws"]:
             ax_roc.plot(fpr_b, tpr_b, color=r["color"], linewidth=0.7, alpha=0.30, zorder=2.5)
         ax_roc.plot(r["fpr_grid"], r["tpr_mean"], color=r["color"], linewidth=2.4, zorder=3,
-                   label=f'{r["label"]} · {r["model"]}  (AUC {r["auc"]:.3f} ({r["auc_lo"]:.3f} - {r["auc_hi"]:.3f}))')
+                   label=f'{r["label"]} · {r["model"]}  (AUROC {r["auc"]:.3f} ({r["auc_lo"]:.3f} - {r["auc_hi"]:.3f}))')
         ax_roc.fill_between(r["fpr_grid"], r["tpr_lo"], r["tpr_hi"],
                             color=r["color"], alpha=0.15, zorder=1.5, linewidth=0)
     ax_roc.set_xlim(0, 1.0)

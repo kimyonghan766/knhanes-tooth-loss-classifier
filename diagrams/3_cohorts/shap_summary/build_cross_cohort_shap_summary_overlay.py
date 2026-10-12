@@ -55,12 +55,15 @@ COHORTS = [
 PIPELINE_CELL_MARKERS = (
     "import numpy as np", "CSV_DIR = '../csv'", "raw_columns = [",
     "pd.to_numeric(df_subset['O_TC']", "# Disease diagnoses:",
-    "REDUNDANCY_REPRESENTATIVE = {", "_reference_50plus_missingness",
+    "REDUNDANCY_REPRESENTATIVE = {", "_missingness_excluded = [",
     "def calculate_egfr", "# Operational diabetes definition:",
     "from sklearn.impute import SimpleImputer", "from sklearn.pipeline import Pipeline",
     "import optuna",
 )
-SHAP_MAX_DISPLAY = 15                # top-15 (notebook cell 54 uses 20; this figure intentionally trims to 15)
+# Panel-title cohort wording (≥ and en dash, matching the text and tables). The COHORTS
+# labels above stay as dictionary keys; only the displayed title uses this map.
+COHORT_TITLES = {"Age 50+": "Age ≥50", "Age 65+": "Age ≥65", "Age 50-64": "Age 50–64"}
+SHAP_MAX_DISPLAY = 15               # top-15 (notebook cell 54 uses 20; this figure intentionally trims to 15)
 OUT_BASENAME = os.path.join(HERE, "cross_cohort_shap_summary_overlay")
 
 # Shortened axis labels for THIS figure only (codebook_labels.py / codebook.md stay
@@ -69,10 +72,11 @@ OUT_BASENAME = os.path.join(HERE, "cross_cohort_shap_summary_overlay")
 LABEL_OVERRIDES = {
     "Daily brushing frequency (count)": "Daily brushing frequency",
     "Diabetes (diagnosed or HbA1c ≥ 6.5%)": "Diabetes",
-    "Dong/Eup-Myeon classification": "City/countryside",
+    "Dong/Eup-Myeon classification": "Urban/rural classification",
+    "Sex": "Female sex",
     "Housing type: Apartment": "Dwelling type: apartment",
     "Estimated kidney function (eGFR, CKD-EPI)": "eGFR",
-    "Frequency of fruit intake, past year": "Freq. fruit intake",
+    "Frequency of fruit intake, past year": "Fruit intake frequency",
     "Current smoking rate indicator": "Current smoking",
     "Final diastolic BP": "Diastolic blood pressure",
 }
@@ -242,7 +246,7 @@ def plot(results):
         for cax in fig.axes[n_axes_before:]:        # the colorbar axis shap just added
             cax.tick_params(labelsize=LABEL_FONTSIZE)   # "High" / "Low"
             cax.yaxis.label.set_size(LABEL_FONTSIZE)    # "Feature value"
-        ax.set_title(f'{r["model"]} ({r["label"]})', fontsize=11, fontweight="normal")
+        ax.set_title(f'{r["model"]} ({COHORT_TITLES[r["label"]]})', fontsize=11, fontweight="normal")
     plt.tight_layout()
     fig.savefig(OUT_BASENAME + ".png", dpi=900, bbox_inches="tight")
     print(f"\nWrote {OUT_BASENAME}.png (900 dpi)")
