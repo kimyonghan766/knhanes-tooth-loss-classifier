@@ -78,6 +78,17 @@ GRID_N = 200                        # points on the common FPR / recall grid use
 OUT_PNG = os.path.join(HERE, "roc_pr_overlay.png")
 PNG_DPI = 600                       # Elsevier-grade combination art
 
+# Shared style constants -- both panels read from here so they cannot drift apart.
+FS_BASE = 11                        # axis labels + tick labels
+FS_TITLE = 12                       # panel titles AND suptitle
+FS_LEGEND = 9.5
+LW_MEAN = 2.4                       # cohort mean curve
+LW_BOOT = 0.7                       # individual bootstrap draws
+LW_CHANCE = 1.3                     # chance / prevalence reference lines
+LW_GRID = 0.8
+CHANCE_STYLE = (0, (5, 4))
+AXIS_GRAY = "#888888"               # spines AND tick marks
+
 
 def cell_output_text(cell):
     out = []
@@ -256,19 +267,21 @@ class _SplitBandHandler(HandlerBase):
 
 
 def plot(results):
-    plt.rcParams.update({"font.size": 11, "axes.edgecolor": "#888888"})
+    plt.rcParams.update({"font.size": FS_BASE, "axes.edgecolor": AXIS_GRAY,
+                         "xtick.color": AXIS_GRAY, "ytick.color": AXIS_GRAY,
+                         "xtick.labelcolor": "black", "ytick.labelcolor": "black"})
     fig, (ax_roc, ax_pr) = plt.subplots(1, 2, figsize=(15.5, 6.4))
     cohort_colors = [r["color"] for r in results]
 
     # ── Left panel: ROC overlay ─────────────────────────────────────────────
-    ax_roc.grid(True, color="#000000", alpha=0.08, linewidth=0.8)
+    ax_roc.grid(True, color="#000000", alpha=0.08, linewidth=LW_GRID)
     ax_roc.set_axisbelow(True)
-    ax_roc.plot([0, 1], [0, 1], color="#888888", linewidth=1.3,
-               linestyle=(0, (5, 4)), alpha=0.8, zorder=2, label="Chance")
+    ax_roc.plot([0, 1], [0, 1], color="#888888", linewidth=LW_CHANCE,
+               linestyle=CHANCE_STYLE, alpha=0.8, zorder=2, label="Chance")
     for r in results:
         for fpr_b, tpr_b in r["roc_draws"]:
-            ax_roc.plot(fpr_b, tpr_b, color=r["color"], linewidth=0.7, alpha=0.30, zorder=2.5)
-        ax_roc.plot(r["fpr_grid"], r["tpr_mean"], color=r["color"], linewidth=2.4, zorder=3,
+            ax_roc.plot(fpr_b, tpr_b, color=r["color"], linewidth=LW_BOOT, alpha=0.30, zorder=2.5)
+        ax_roc.plot(r["fpr_grid"], r["tpr_mean"], color=r["color"], linewidth=LW_MEAN, zorder=3,
                    label=f'{r["label"]} · {r["model"]}  (AUROC {r["auc"]:.3f} ({r["auc_lo"]:.3f} - {r["auc_hi"]:.3f}))')
         ax_roc.fill_between(r["fpr_grid"], r["tpr_lo"], r["tpr_hi"],
                             color=r["color"], alpha=0.15, zorder=1.5, linewidth=0)
@@ -276,50 +289,51 @@ def plot(results):
     ax_roc.set_ylim(0, 1.02)
     ax_roc.set_xlabel("False Positive Rate")
     ax_roc.set_ylabel("True Positive Rate")
-    ax_roc.set_title("Receiver Operating Characteristic", fontsize=12, loc="left")
+    ax_roc.set_title("Receiver Operating Characteristic", fontsize=FS_TITLE, loc="left")
     # shared "95% CI" entry: a proxy handle rendered by _SplitBandHandler as an N-way split patch
     roc_handles, roc_labels = ax_roc.get_legend_handles_labels()
     roc_ci_proxy = Rectangle((0, 0), 1, 1)
     roc_handles.append(roc_ci_proxy)
     roc_labels.append("95% CI")
     ax_roc.legend(roc_handles, roc_labels, handler_map={roc_ci_proxy: _SplitBandHandler(cohort_colors, 0.15)},
-                 loc="lower right", frameon=True, framealpha=0.9, fontsize=9.5)
+                 loc="lower right", frameon=True, framealpha=0.9, fontsize=FS_LEGEND)
     for s in ("top", "right"):
         ax_roc.spines[s].set_visible(False)
 
     # ── Right panel: PR overlay ─────────────────────────────────────────────
-    ax_pr.grid(True, color="#000000", alpha=0.08, linewidth=0.8)
+    ax_pr.grid(True, color="#000000", alpha=0.08, linewidth=LW_GRID)
     ax_pr.set_axisbelow(True)
+    # one representative "Chance" legend entry for both (differently-valued) baselines;
+    # plotted first so it leads the legend, matching the ROC panel
+    ax_pr.plot([], [], color="#888888", linewidth=LW_CHANCE, linestyle=CHANCE_STYLE, alpha=0.8, label="Chance")
     for r in results:
-        ax_pr.axhline(r["baseline"], color="#888888", linewidth=1.3,
-                      linestyle=(0, (5, 4)), alpha=0.8, zorder=2)
+        ax_pr.axhline(r["baseline"], color="#888888", linewidth=LW_CHANCE,
+                      linestyle=CHANCE_STYLE, alpha=0.8, zorder=2)
     for r in results:
         for rec_b, prec_b in r["pr_draws"]:
-            ax_pr.plot(rec_b, prec_b, color=r["color"], linewidth=0.7, alpha=0.30, zorder=2.5)
-        ax_pr.plot(r["rec_grid"], r["prec_mean"], color=r["color"], linewidth=2.4, zorder=3,
+            ax_pr.plot(rec_b, prec_b, color=r["color"], linewidth=LW_BOOT, alpha=0.30, zorder=2.5)
+        ax_pr.plot(r["rec_grid"], r["prec_mean"], color=r["color"], linewidth=LW_MEAN, zorder=3,
                    label=f'{r["label"]} · {r["model"]}  (AUPRC {r["ap"]:.3f} ({r["ap_lo"]:.3f} - {r["ap_hi"]:.3f}))')
         ax_pr.fill_between(r["rec_grid"], r["prec_lo"], r["prec_hi"],
                            color=r["color"], alpha=0.15, zorder=1.5, linewidth=0)
-    # one representative "Chance" legend entry for both (differently-valued) baselines
-    ax_pr.plot([], [], color="#888888", linewidth=1.3, linestyle=(0, (5, 4)), alpha=0.8, label="Chance")
     ax_pr.set_xlim(0, 1.0)
     ax_pr.set_ylim(0, 1.02)
     ax_pr.set_xlabel("Recall  (of tooth-loss cases, <20 teeth)")
     ax_pr.set_ylabel("Precision")
-    ax_pr.set_title("Precision–Recall", fontsize=12, loc="left")
+    ax_pr.set_title("Precision–Recall", fontsize=FS_TITLE, loc="left")
     # shared "95% CI" entry: a proxy handle rendered by _SplitBandHandler as an N-way split patch
     pr_handles, pr_labels = ax_pr.get_legend_handles_labels()
     pr_ci_proxy = Rectangle((0, 0), 1, 1)
     pr_handles.append(pr_ci_proxy)
     pr_labels.append("95% CI")
     ax_pr.legend(pr_handles, pr_labels, handler_map={pr_ci_proxy: _SplitBandHandler(cohort_colors, 0.15)},
-                loc="upper right", frameon=True, framealpha=0.9, fontsize=9.5)
+                loc="upper right", frameon=True, framealpha=0.9, fontsize=FS_LEGEND)
     for s in ("top", "right"):
         ax_pr.spines[s].set_visible(False)
 
     fig.suptitle(f"Cross-cohort AUROC & AUPRC — common CatBoost model, "
                  f"{N_BOOT_DRAW} bootstrap resamples of the 2024 test set (mean, 95% CI)",
-                 fontsize=12.5, x=0.01, ha="left")
+                 fontsize=FS_TITLE, x=0.01, ha="left")
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(OUT_PNG, dpi=PNG_DPI, bbox_inches="tight")
     print(f"\nWrote {OUT_PNG} ({PNG_DPI} dpi)")
