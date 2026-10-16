@@ -1,185 +1,231 @@
-# Tooth Loss Risk Analysis — KNHANES 2020–2024
+# Tooth Loss Classification and Survey-Weighted Regression in KNHANES 2020–2024
 
-Binary classification and inferential analysis of severe tooth loss (< 20 teeth) in Korean adults aged ≥ 50, using pooled data from five waves of the **Korea National Health and Nutrition Examination Survey (KNHANES 2020–2024)**.
+This repository contains the reproducible analysis for a three-cohort study of functional tooth loss among Korean adults using the 2020–2024 Korea National Health and Nutrition Examination Survey (KNHANES).
 
----
+The current, manuscript-authoritative notebooks are:
 
-## Research Question
+| Cohort | Notebook | Role |
+|---|---|---|
+| Adults aged ≥50 years | [`Main/CB_50+.ipynb`](Main/CB_50+.ipynb) | Overall cohort |
+| Adults aged 50–64 years | [`Main/CB_50-64.ipynb`](Main/CB_50-64.ipynb) | Middle-aged subgroup |
+| Adults aged ≥65 years | [`Main/CB_65+.ipynb`](Main/CB_65+.ipynb) | Older-adult subgroup |
 
-> Do CKD (eGFR), diabetes, and socioeconomic status independently affect tooth loss after controlling for age, sex, and other covariates?
+Files beginning with `OG_` are archived earlier versions and are not sources for manuscript results. The executed outputs in the three `CB_` notebooks are the source of truth for tables, metrics, and figures.
 
-This project answers two related but distinct questions:
-- **Predictive:** Which features best classify tooth loss? (ML models)
-- **Explanatory:** Are the exposures of interest statistically independent risk factors? (survey-weighted logistic regression with adjusted ORs)
+## Study design
 
----
+The analysis has two complementary components:
 
-## Dataset
+- Predictive analysis: five machine-learning algorithms classify prevalent functional tooth loss in a temporally held-out survey wave.
+- Explanatory analysis: exploratory survey-weighted multivariable logistic regression estimates adjusted associations with functional tooth loss.
 
-| Item | Detail |
-|------|--------|
-| Source | KNHANES 2020–2024 (`HN20_all.csv` – `HN24_all.csv`) |
-| Population | Adults aged ≥ 50 |
-| Target | `O_TC_` — `1` if tooth count < 20, `0` if ≥ 20 |
-| Inferential complete-case n | 11,700 |
-| Tooth-loss prevalence | 25.0% |
+This is a cross-sectional classification study. Model predictions should not be described as forecasts of future incident tooth loss, and adjusted associations should not be interpreted as causal effects.
 
-The < 20 threshold follows clinical literature establishing functional impairment in chewing and digestion.
+### Cohorts and analytic samples
 
----
+| Cohort | Full 2020–2024 ML sample | Development, 2020–2023 | Held-out test, 2024 | Full-regression complete cases |
+|---|---:|---:|---:|---:|
+| ≥50 years | 14,871 | 11,536 | 3,335 | 11,695 |
+| 50–64 years | 7,167 | 5,590 | 1,577 | 5,905 |
+| ≥65 years | 7,704 | 5,946 | 1,758 | 5,790 |
 
-## Features
+The ≥50 cohort contains both age subgroups. The 50–64 and ≥65 cohorts are mutually exclusive, but comparisons involving the ≥50 cohort are not independent.
 
-### Core Exposures
+### Outcome
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `eGFR` | Derived (continuous) | Estimated GFR via CKD-EPI 2021 equation (from `HE_crea` + age + sex) |
-| `diabetes` | Binary | `DE1_dg == 1` OR `HE_HbA1c ≥ 6.5%` — combined criterion |
-| `hypertension` | Binary | `HE_sbp ≥ 140` OR `HE_dbp ≥ 90` |
-| `ho_incm` | Ordinal (1–4) | Household income quartile |
-| `edu` | Ordinal (1–4) | Education level (1 = ≤ elementary, 4 = ≥ college) |
+The binary outcome is derived from natural tooth count:
 
-### SES / Demographics
+```text
+O_TC_ = 1 when O_TC < 20 natural teeth
+O_TC_ = 0 when O_TC ≥ 20 natural teeth
+```
 
-| Column | Description |
-|--------|-------------|
-| `occp` | Occupation (7 categories; reference = Managers/Professionals) |
-| `marri_1` | Marital status (1 = married, 0 = unmarried) |
-| `town_t` | Urban (1) vs. rural (0) residence |
-| `region` | 17 regional provinces (excluded from regression — no valid linear encoding) |
+Observations without a usable outcome are not included in the analytic cohort.
 
-### Lifestyle
+## Data
 
-| Column | Description |
-|--------|-------------|
-| `sm_presnt` | Current smoker (1 = yes) |
-| `BD1` | Lifetime alcohol experience (1 = yes, 0 = no) |
-| `pa_aerobic` | Meets aerobic physical activity guidelines |
-| `BP1` | Perceived stress (reversed: higher = more stressed) |
-| `brush_freq` | Brushing occasions yesterday (sum of BM1_1–BM1_8, 0–8) |
+The notebooks expect the five KNHANES files below in `csv/`:
 
-### Clinical / Lab
+```text
+csv/HN20_all.csv
+csv/HN21_all.csv
+csv/HN22_all.csv
+csv/HN23_all.csv
+csv/HN24_all.csv
+```
 
-| Column | Description |
-|--------|-------------|
-| `HE_HbA1c` | HbA1c (%) |
-| `HE_BMI` | BMI (kg/m²) |
-| `HE_sbp` / `HE_dbp` | Systolic / diastolic blood pressure |
-| `HE_Uacid` | Serum uric acid (mg/dL) |
-| `HE_Upro` | Urinary protein (proteinuria grade) |
-| `HE_Ucrea` | Urinary creatinine |
-| `HE_TG` | Triglycerides (mg/dL) |
+KNHANES source data should be obtained through the official data-access process. The five raw CSV files are currently tracked in this repository; confirm KNHANES redistribution permissions before making the repository or an archived release public. Variable definitions and English labels used by the analysis are documented in [`codebook.md`](codebook.md) and resolved for plots by [`Main/codebook_labels.py`](Main/codebook_labels.py).
 
-### Dietary
+## Predictor specification and preprocessing
 
-`N_CA` (calcium), `N_NA` (sodium), `N_PROT` (protein), `N_TDF` (fiber), `LS_VEG1` (vegetable intake), `LS_FRUIT` (fruit intake), `N_SUGAR` (sugar).
+The three notebooks use the same candidate-variable policy, fixed encoded-column schema, and modeling sequence. Candidate screening is performed on the relevant cohort's complete 2020–2023 development sample. The shared rare-level and encoded-column policy is fixed across cohorts; imputation, scaling, and learner fitting are estimated inside the applicable training folds.
 
-### Dental
+The implemented workflow is:
 
-`O_pain` (oral pain), `MO4_00` (dental visit), `BM1_0`–`BM1_8` (brushing occasion flags → `brush_freq`).
+1. Combine the 2020–2024 survey files and apply the cohort age restriction.
+2. Replace KNHANES invalid, nonresponse, and sentinel codes with missing values.
+3. Derive eGFR using the 2021 CKD-EPI creatinine equation, diabetes from diagnosis or HbA1c ≥6.5%, and tooth-brushing frequency from the brushing-time indicators.
+4. Screen candidate predictors for more than 15% apparent missingness in the 2020–2023 development data only.
+5. Remove redundant representations before fitting.
+6. Apply the fixed cross-cohort categorical schema, rare-level policy, and explicit reference levels.
+7. Fit imputation and any scaling within each cross-validation training fold.
+8. Refit the selected specification on all 2020–2023 data and evaluate once on 2024.
 
-`HE_crea` and `sex` are consumed by the eGFR derivation and dropped from the feature matrix.
+The five variables excluded by the development-data availability rule are `DI4_dg`, `DE1_4`, `BS3_1`, `BD2_1`, and `LW_ms`. Some apparent missingness reflects questionnaire eligibility or skip patterns rather than ordinary item nonresponse. The four redundant variables excluded are `HE_obe`, `HE_wc`, `HE_glu`, and `N_EN`.
 
----
+The final machine-learning matrix represents 43 predictor concepts as 88 columns after categorical expansion. Categorical, ordinal, and binary variables are imputed with their training-fold mode; continuous variables are imputed with their training-fold median. Multi-category nominal missingness is retained as an explicit unknown level where specified. Logistic-regression scaling is applied to continuous and ordinal columns only; binary indicator columns are not standardized.
 
-## Pipeline
+Candidate screening and construction of the fixed schema occur before outer cross-validation, so they are development-wide decisions rather than fold-estimated transformations. Accordingly, the analysis should not be described as having every preprocessing decision nested inside the outer folds.
 
-### Preprocessing
-1. Age filter: ≥ 50
-2. Invalid-code replacement — survey codes (8, 9, 88, 99, etc.) and sentinel floats (`-1.80E+308`) → `NaN`
-3. eGFR derivation using CKD-EPI 2021 creatinine equation
-4. Derived features: `diabetes` (combined criterion), `hypertension`, `brush_freq`
-5. `BD1` recode (KNHANES 1/2 → 1/0); `BP1` reversal (higher = more stressed)
+## Predictive modeling
 
-### Train / Test Split (Temporal)
+The evaluated algorithms are:
 
-| Set | Source files | Years |
-|-----|-------------|-------|
-| **Train** | HN20, HN21, HN22, HN23 | 2020–2023 |
-| **Test** | HN24 | 2024 |
+- random forest;
+- XGBoost;
+- LightGBM;
+- CatBoost; and
+- elastic-net logistic regression.
 
-The imputer is fitted on the training fold only and applied to the test set without refitting, preventing data leakage. `year` is used solely as a split key.
+### Nested cross-validation and tuning
 
-### Class Imbalance
-No SMOTE. XGBoost tunes `scale_pos_weight` via Optuna; all other models use `class_weight="balanced"`.
+Model development uses honest nested cross-validation within the 2020–2023 development sample:
 
----
+- five stratified outer folds estimate out-of-fold performance;
+- each outer training portion uses five-fold inner cross-validation;
+- Optuna runs 50 trials per model in each inner search;
+- unweighted average precision (AUPRC) is the selection score; and
+- a separate 50-trial, five-fold search on the complete development set selects hyperparameters for the final 2024 refit.
 
-## Predictive Models
+This is intentionally computationally intensive. Reducing the number of inner folds or Optuna trials can shorten exploratory runs, but manuscript results should be generated with the settings recorded in the notebooks.
 
-### Hyperparameter Tuning (Optuna TPE)
-100-trial Optuna TPE study per model, 5-fold `StratifiedKFold`, scored by `roc_auc`. `StandardScaler` is applied inside the Logistic Regression pipeline only — tree-based models are scale-invariant.
+Class-imbalance handling is fixed rather than tuned. Random forest, LightGBM, and logistic regression use balanced class weighting; CatBoost uses automatic balanced class weights. XGBoost's `scale_pos_weight` is calculated from the outcome counts in the applicable training fold and from the full development set for the final refit. It is not an Optuna hyperparameter.
 
-| Model | Key Hyperparameters Tuned |
-|-------|--------------------------|
-| **XGBoost** | `n_estimators`, `max_depth`, `learning_rate`, `subsample`, `colsample_bytree`, `min_child_weight`, `gamma`, `reg_lambda`, `scale_pos_weight` |
-| **LightGBM** | `n_estimators`, `num_leaves`, `learning_rate`, `min_child_samples`, `reg_lambda` |
-| **CatBoost** | `iterations`, `depth`, `learning_rate`, `l2_leaf_reg` |
-| **Random Forest** | `n_estimators`, `max_depth`, `min_samples_leaf` |
-| **Logistic Regression** | `C`, `l1_ratio` (ElasticNet, SAGA solver) |
+### Held-out evaluation and weighting
 
-### Evaluation
-- ROC-AUC and AUPRC on the held-out 2024 test set
-- Threshold selection via Youden's J and MCC (optimised on out-of-fold probabilities)
-- Calibration curves (Brier score)
-- SHAP values: beeswarm, waterfall, dependence plots, mean |SHAP| bar chart
+The notebooks distinguish model-development quantities from population-oriented test estimates:
 
----
+| Analysis | Data | Survey weighting |
+|---|---|---|
+| Nested-CV model selection | 2020–2023 development data | Unweighted |
+| Final discrimination and Brier score | 2024 held-out test data | Weighted by `wt_itvex` |
+| Metric confidence intervals | 2024 held-out test data | PSU-within-stratum survey bootstrap, 2,000 replicates |
+| Pairwise DeLong AUROC comparison | 2024 held-out test data | Unweighted; secondary analysis |
+| MCC and Youden threshold selection | Nested OOF predictions from 2020–2023 | Unweighted |
+| Threshold-dependent metrics and confusion matrix | 2024 held-out test data | Unweighted, using the development-selected threshold |
+| Decision-curve analysis | 2024 held-out test data | Unweighted |
 
-## Inferential Analysis
+The notebooks report AUROC, AUPRC, Brier score, calibration, threshold-dependent classification measures, subgroup performance, learning curves, and decision curves. The MCC operating threshold is defined on the raw model score; Platt-recalibrated probabilities are used for the calibration and decision-curve sections as labeled in each notebook.
 
-Survey-weighted multivariable logistic regression (`svyglm`, Taylor linearization) on the complete-case subset (n = 11,700, tooth-loss prevalence = 25.0%).
+### Calibration and explainability
 
-**Adjusted Odds Ratios (aOR) — selected variables:**
+Platt calibration is fitted to nested out-of-fold development predictions and then applied to held-out 2024 predictions. Weighted Brier score, expected calibration error, and calibration curves are calculated for the test population.
 
-| Variable | aOR | 95% CI | p-value |
-|----------|-----|--------|---------|
-| Current smoker | 1.90 | [1.58, 2.28] | **< 0.001** |
-| Occupation: Craft/Trade (`occp_4`) | 1.51 | [1.05, 2.15] | **0.024** |
-| Occupation: Machine op. (`occp_5`) | 1.42 | [1.02, 1.98] | **0.037** |
-| Diabetes (combined criterion) | 1.39 | [1.22, 1.59] | **< 0.001** |
-| Occupation: Elementary (`occp_6`) | 1.33 | [0.96, 1.86] | 0.091 |
-| Education level | 0.78 | [0.73, 0.83] | **< 0.001** |
-| Income quartile | 0.90 | [0.84, 0.95] | **0.0004** |
-| Urban residence | 0.76 | [0.66, 0.87] | **0.0001** |
-| Proteinuria (`HE_Upro`) | 1.14 | [1.01, 1.29] | **0.033** |
-| Triglycerides | 1.0008 | [1.0003, 1.0014] | **0.005** |
-| eGFR | 1.00 | [1.00, 1.01] | 0.603 |
-| Alcohol experience | 1.12 | [0.96, 1.32] | 0.142 |
-| Marital status (married) | 0.77 | [0.51, 1.16] | 0.208 |
+SHAP summaries use the CatBoost model as a common algorithm across all three cohorts. These are three separately fitted cohort models, not one shared fitted model. Global importance is the unweighted mean absolute SHAP value in the 2024 test sample. Attributions are calculated for the 88 encoded columns on CatBoost's raw model-output scale, before Platt recalibration; they are not aggregated back to the 43 underlying predictor concepts. SHAP is descriptive and does not establish an independent or causal association.
 
-**Key findings:**
-- Smoking is the strongest modifiable risk factor (aOR ≈ 1.90, p < 0.001)
-- Diabetes remains an independent risk factor after adjustment (aOR ≈ 1.39, p < 0.001)
-- Education and income are protective; urban residence is also protective
-- eGFR is **not** an independent predictor after adjustment (p = 0.603)
-- Manual/elementary occupations carry elevated risk vs. managerial/professional reference
+CatBoost is retained as the common algorithm for cross-cohort explainability even when another algorithm has the highest nested out-of-fold AUPRC in a particular cohort. This choice should not be described as test-set model selection.
 
-**VIF check:** All predictors < 5 — no problematic multicollinearity despite eGFR–age correlation.
+## Survey-weighted descriptive and regression analyses
 
----
+Descriptive estimates use the full eligible 2020–2024 cohort and the KNHANES complex survey design.
 
-## Requirements
+The multivariable analysis is one full exploratory survey-weighted logistic-regression model in each cohort. It includes the current 43 predictor concepts, including dental variables. It is not the deleted SHAP-informed confirmatory model. Age is entered linearly; no age spline is used in the current regression.
+
+Implementation details:
+
+- complete-case analysis for the regression specification;
+- Taylor-series variance estimation with R's `survey::svyglm`;
+- five-year pooled examination weights, `wt_itvex / 5`;
+- survey-year-specific stratum and PSU identifiers to prevent identifier collisions across waves;
+- explicit categorical reference levels;
+- calcium scaled per 100 mg and sodium per 1,000 mg for reporting;
+- no imputation or synthetic oversampling in the regression; and
+- nominal, unadjusted P values.
+
+The regression analyses are exploratory. P values are nominal and are not adjusted for multiple comparisons; consequently, P<0.05 is not interpreted as confirmatory evidence.
+
+Categorical expansion produces more coefficient rows than the 43 underlying predictor concepts. Forest-plot sample sizes and adjusted odds ratios must match the full regression output in the corresponding executed notebook.
+
+## Cross-cohort figures
+
+Current manuscript figure builders and rendered PNGs are under `diagrams/3_cohorts/`:
+
+| Figure | Builder | Interpretation |
+|---|---|---|
+| Regression forest plot | [`build_cross_cohort_forest_plot.py`](diagrams/3_cohorts/forest_plot/build_cross_cohort_forest_plot.py) | Current full exploratory survey-weighted regression, not the deleted SHAP-informed model |
+| SHAP summary | [`build_cross_cohort_shap_summary_overlay.py`](diagrams/3_cohorts/shap_summary/build_cross_cohort_shap_summary_overlay.py) | Cohort-specific CatBoost SHAP distributions |
+| ROC and precision–recall overlay | [`build_roc_pr_overlay.py`](diagrams/3_cohorts/roc_pr_overlay/build_roc_pr_overlay.py) | Held-out 2024 discrimination across the three cohorts |
+| Calibration and decision-curve overlay | [`build_calibration_dca_overlay.py`](diagrams/3_cohorts/calibration_dca_overlay/build_calibration_dca_overlay.py) | Recalibrated held-out probabilities and clinical net benefit |
+
+The corresponding rendered files are:
+
+```text
+diagrams/3_cohorts/forest_plot/cross_cohort_forest_plot_annotated.png
+diagrams/3_cohorts/shap_summary/cross_cohort_shap_summary_overlay.png
+diagrams/3_cohorts/roc_pr_overlay/roc_pr_overlay.png
+diagrams/3_cohorts/calibration_dca_overlay/calibration_dca_overlay.png
+```
+
+Regenerate figures after any notebook rerun that changes sample sizes, model predictions, SHAP values, or regression coefficients.
+
+## Environment and execution
+
+The exact analysis environment is documented in [`ENVIRONMENT.md`](ENVIRONMENT.md), and the pinned Python dependencies are listed in [`requirements.txt`](requirements.txt). The regression sections additionally require R, `rpy2`, and the R `survey` package; a Python-only installation cannot reproduce the complete analysis.
+
+The notebooks use paths relative to `Main/`. Start Jupyter from that directory:
 
 ```bash
-pip install pandas numpy matplotlib seaborn scikit-learn xgboost lightgbm catboost optuna shap statsmodels
+cd Main
+jupyter lab
 ```
 
-Python 3.11+ recommended.
+Then restart the kernel and run all cells in this order:
 
----
+1. `CB_50+.ipynb`
+2. `CB_50-64.ipynb`
+3. `CB_65+.ipynb`
 
-## File Structure
+The notebooks are analytically independent, so the order does not affect their results. The suggested order only makes cross-cohort checking easier. Do not run only selected downstream cells after changing preprocessing, the cohort definition, or model settings.
 
-```
+Before transferring results to a manuscript, verify all of the following from the newly executed notebooks:
+
+- cohort, development, test, and regression sample sizes;
+- tooth-loss prevalence and survey-weighted descriptive statistics;
+- nested out-of-fold model-selection results;
+- weighted 2024 metrics and confidence intervals;
+- calibration and decision-curve values;
+- SHAP variable labels and ranks;
+- regression adjusted odds ratios, confidence intervals, and P values; and
+- all figure annotations and legends.
+
+Avoid manually preserving numeric results in this README. The executed notebook outputs should remain the single source of truth whenever the pipeline is rerun.
+
+## Repository structure
+
+```text
+.
 ├── Main/
-│   └── test(age).ipynb      # full analysis notebook
+│   ├── CB_50+.ipynb
+│   ├── CB_50-64.ipynb
+│   ├── CB_65+.ipynb
+│   ├── OG_*.ipynb                 # archived; not manuscript-authoritative
+│   ├── codebook_labels.py
+│   └── shap_importance_*_catboost.npz
 ├── csv/
-│   ├── HN20_all.csv         # KNHANES 2020 (not tracked)
-│   ├── HN21_all.csv         # KNHANES 2021 (not tracked)
-│   ├── HN22_all.csv         # KNHANES 2022 (not tracked)
-│   ├── HN23_all.csv         # KNHANES 2023 (not tracked)
-│   └── HN24_all.csv         # KNHANES 2024 (not tracked)
+│   └── HN20_all.csv ... HN24_all.csv
+├── diagrams/
+│   └── 3_cohorts/
+├── webapp/
+├── codebook.md
+├── ENVIRONMENT.md
+├── requirements.txt
 └── README.md
 ```
+
+## Ancillary web application
+
+`webapp/` is an ancillary demonstration and is not an authoritative source for manuscript estimates. Its bundled artifacts currently cover the ≥50 and ≥65 cohorts only and retain older 79- and 77-column schemas, respectively. The current manuscript notebooks use the shared 88-column schema. The application artifacts should not be used to reproduce current three-cohort results unless they are deliberately redesigned, re-exported, and validated against the current `CB_` notebooks.
+
+## Reproducibility boundary
+
+Reproduction requires the original KNHANES files, the recorded Python and R environments, and a complete run of all three `CB_` notebooks. Random seeds are fixed where supported, but small differences can still occur across operating systems or library builds for multithreaded learners. Any rerun used for submission should archive the executed notebooks and regenerated figures together.
