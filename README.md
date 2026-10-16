@@ -54,11 +54,11 @@ csv/HN23_all.csv
 csv/HN24_all.csv
 ```
 
-KNHANES source data must be obtained through the official data-access process. Raw survey files are not redistributed by this repository. Variable definitions and English labels used by the analysis are documented in [`codebook.md`](codebook.md) and resolved for plots by [`Main/codebook_labels.py`](Main/codebook_labels.py).
+KNHANES source data should be obtained through the official data-access process. The five raw CSV files are currently tracked in this repository; confirm KNHANES redistribution permissions before making the repository or an archived release public. Variable definitions and English labels used by the analysis are documented in [`codebook.md`](codebook.md) and resolved for plots by [`Main/codebook_labels.py`](Main/codebook_labels.py).
 
 ## Predictor specification and preprocessing
 
-The three notebooks use the same candidate-variable policy and modeling sequence. Cohort-specific preprocessing is learned only from the relevant development data.
+The three notebooks use the same candidate-variable policy, fixed encoded-column schema, and modeling sequence. Candidate screening is performed on the relevant cohort's complete 2020–2023 development sample. The shared rare-level and encoded-column policy is fixed across cohorts; imputation, scaling, and learner fitting are estimated inside the applicable training folds.
 
 The implemented workflow is:
 
@@ -67,13 +67,15 @@ The implemented workflow is:
 3. Derive eGFR using the 2021 CKD-EPI creatinine equation, diabetes from diagnosis or HbA1c ≥6.5%, and tooth-brushing frequency from the brushing-time indicators.
 4. Screen candidate predictors for more than 15% apparent missingness in the 2020–2023 development data only.
 5. Remove redundant representations before fitting.
-6. Apply a fixed cross-cohort categorical schema and explicit reference levels.
+6. Apply the fixed cross-cohort categorical schema, rare-level policy, and explicit reference levels.
 7. Fit imputation and any scaling within each cross-validation training fold.
 8. Refit the selected specification on all 2020–2023 data and evaluate once on 2024.
 
 The five variables excluded by the development-data availability rule are `DI4_dg`, `DE1_4`, `BS3_1`, `BD2_1`, and `LW_ms`. Some apparent missingness reflects questionnaire eligibility or skip patterns rather than ordinary item nonresponse. The four redundant variables excluded are `HE_obe`, `HE_wc`, `HE_glu`, and `N_EN`.
 
 The final machine-learning matrix represents 43 predictor concepts as 88 columns after categorical expansion. Categorical, ordinal, and binary variables are imputed with their training-fold mode; continuous variables are imputed with their training-fold median. Multi-category nominal missingness is retained as an explicit unknown level where specified. Logistic-regression scaling is applied to continuous and ordinal columns only; binary indicator columns are not standardized.
+
+Candidate screening and construction of the fixed schema occur before outer cross-validation, so they are development-wide decisions rather than fold-estimated transformations. Accordingly, the analysis should not be described as having every preprocessing decision nested inside the outer folds.
 
 ## Predictive modeling
 
@@ -109,7 +111,8 @@ The notebooks distinguish model-development quantities from population-oriented 
 | Final discrimination and Brier score | 2024 held-out test data | Weighted by `wt_itvex` |
 | Metric confidence intervals | 2024 held-out test data | PSU-within-stratum survey bootstrap, 2,000 replicates |
 | Pairwise DeLong AUROC comparison | 2024 held-out test data | Unweighted; secondary analysis |
-| MCC threshold and confusion matrix | 2024 held-out test data | Unweighted |
+| MCC and Youden threshold selection | Nested OOF predictions from 2020–2023 | Unweighted |
+| Threshold-dependent metrics and confusion matrix | 2024 held-out test data | Unweighted, using the development-selected threshold |
 | Decision-curve analysis | 2024 held-out test data | Unweighted |
 
 The notebooks report AUROC, AUPRC, Brier score, calibration, threshold-dependent classification measures, subgroup performance, learning curves, and decision curves. The MCC operating threshold is defined on the raw model score; Platt-recalibrated probabilities are used for the calibration and decision-curve sections as labeled in each notebook.
@@ -118,7 +121,7 @@ The notebooks report AUROC, AUPRC, Brier score, calibration, threshold-dependent
 
 Platt calibration is fitted to nested out-of-fold development predictions and then applied to held-out 2024 predictions. Weighted Brier score, expected calibration error, and calibration curves are calculated for the test population.
 
-SHAP summaries use the CatBoost model as a common algorithm across all three cohorts. These are three separately fitted cohort models, not one shared fitted model. Global importance is the unweighted mean absolute SHAP value in the 2024 test sample. SHAP is descriptive and does not establish an independent or causal association.
+SHAP summaries use the CatBoost model as a common algorithm across all three cohorts. These are three separately fitted cohort models, not one shared fitted model. Global importance is the unweighted mean absolute SHAP value in the 2024 test sample. Attributions are calculated for the 88 encoded columns on CatBoost's raw model-output scale, before Platt recalibration; they are not aggregated back to the 43 underlying predictor concepts. SHAP is descriptive and does not establish an independent or causal association.
 
 CatBoost is retained as the common algorithm for cross-cohort explainability even when another algorithm has the highest nested out-of-fold AUPRC in a particular cohort. This choice should not be described as test-set model selection.
 
@@ -221,7 +224,7 @@ Avoid manually preserving numeric results in this README. The executed notebook 
 
 ## Ancillary web application
 
-`webapp/` is an ancillary demonstration and is not an authoritative source for manuscript estimates. Its bundled artifacts currently cover the ≥50 and ≥65 cohorts only. They should not be used to reproduce three-cohort manuscript results unless the application models are explicitly re-exported and validated against the current notebooks.
+`webapp/` is an ancillary demonstration and is not an authoritative source for manuscript estimates. Its bundled artifacts currently cover the ≥50 and ≥65 cohorts only and retain older 79- and 77-column schemas, respectively. The current manuscript notebooks use the shared 88-column schema. The application artifacts should not be used to reproduce current three-cohort results unless they are deliberately redesigned, re-exported, and validated against the current `CB_` notebooks.
 
 ## Reproducibility boundary
 
