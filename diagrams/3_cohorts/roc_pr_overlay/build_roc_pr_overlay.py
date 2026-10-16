@@ -78,10 +78,12 @@ GRID_N = 200                        # points on the common FPR / recall grid use
 OUT_PNG = os.path.join(HERE, "roc_pr_overlay.png")
 PNG_DPI = 600                       # Elsevier-grade combination art
 
-# Shared style constants -- both panels read from here so they cannot drift apart.
-FS_BASE = 11                        # axis labels + tick labels
-FS_TITLE = 12                       # panel titles AND suptitle
-FS_LEGEND = 9.5
+# Match the cross-cohort SHAP summary's source-figure typography.
+FS_FALLBACK = 9                     # global fallback text
+FS_BASE = 10                        # tick labels and ordinary annotations
+FS_AXIS = 10                        # axis titles
+FS_TITLE = 11                       # panel titles and figure title
+FS_LEGEND = 10
 LW_MEAN = 2.4                       # cohort mean curve
 LW_BOOT = 0.7                       # individual bootstrap draws
 LW_CHANCE = 1.3                     # chance / prevalence reference lines
@@ -267,7 +269,7 @@ class _SplitBandHandler(HandlerBase):
 
 
 def plot(results):
-    plt.rcParams.update({"font.size": FS_BASE, "axes.edgecolor": AXIS_GRAY,
+    plt.rcParams.update({"font.size": FS_FALLBACK, "axes.edgecolor": AXIS_GRAY,
                          "xtick.color": AXIS_GRAY, "ytick.color": AXIS_GRAY,
                          "xtick.labelcolor": "black", "ytick.labelcolor": "black"})
     fig, (ax_roc, ax_pr) = plt.subplots(1, 2, figsize=(15.5, 6.4))
@@ -287,8 +289,8 @@ def plot(results):
                             color=r["color"], alpha=0.15, zorder=1.5, linewidth=0)
     ax_roc.set_xlim(0, 1.0)
     ax_roc.set_ylim(0, 1.02)
-    ax_roc.set_xlabel("False Positive Rate")
-    ax_roc.set_ylabel("True Positive Rate")
+    ax_roc.set_xlabel("False Positive Rate", fontsize=FS_AXIS)
+    ax_roc.set_ylabel("True Positive Rate", fontsize=FS_AXIS)
     ax_roc.set_title("Receiver Operating Characteristic", fontsize=FS_TITLE, loc="left")
     # shared "95% CI" entry: a proxy handle rendered by _SplitBandHandler as an N-way split patch
     roc_handles, roc_labels = ax_roc.get_legend_handles_labels()
@@ -318,8 +320,8 @@ def plot(results):
                            color=r["color"], alpha=0.15, zorder=1.5, linewidth=0)
     ax_pr.set_xlim(0, 1.0)
     ax_pr.set_ylim(0, 1.02)
-    ax_pr.set_xlabel("Recall  (of tooth-loss cases, <20 teeth)")
-    ax_pr.set_ylabel("Precision")
+    ax_pr.set_xlabel("Recall  (of tooth-loss cases, <20 teeth)", fontsize=FS_AXIS)
+    ax_pr.set_ylabel("Precision", fontsize=FS_AXIS)
     ax_pr.set_title("Precision–Recall", fontsize=FS_TITLE, loc="left")
     # shared "95% CI" entry: a proxy handle rendered by _SplitBandHandler as an N-way split patch
     pr_handles, pr_labels = ax_pr.get_legend_handles_labels()

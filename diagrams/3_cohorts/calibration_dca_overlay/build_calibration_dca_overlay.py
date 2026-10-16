@@ -82,6 +82,13 @@ GRID_N = 200                        # points on the common predicted-probability
 OUT_PNG = os.path.join(HERE, "calibration_dca_overlay.png")
 PNG_DPI = 600                       # Elsevier-grade combination art
 
+# Match the cross-cohort SHAP summary's source-figure typography.
+FS_FALLBACK = 9                     # global fallback text
+FS_BASE = 10                        # tick labels and ordinary annotations
+FS_AXIS = 10                        # axis titles
+FS_TITLE = 11                       # panel titles and figure title
+FS_LEGEND = 10
+
 
 def cell_output_text(cell):
     out = []
@@ -304,7 +311,9 @@ def run_cohort(label, nbfile, color):
 
 
 def plot(results):
-    plt.rcParams.update({"font.size": 11, "axes.edgecolor": "#888888"})
+    from matplotlib.lines import Line2D
+
+    plt.rcParams.update({"font.size": FS_FALLBACK, "axes.edgecolor": "#888888"})
     fig, (ax_cal, ax_dca) = plt.subplots(1, 2, figsize=(15.5, 6.4))
 
     # ── Left panel: Calibration overlay (Platt-recalibrated, best model per cohort) ──
@@ -314,13 +323,20 @@ def plot(results):
                linestyle=(0, (5, 4)), alpha=0.8, zorder=2, label="Perfectly calibrated")
     for r in results:
         ax_cal.plot(r["prob_grid"], r["prob_true_mean"], color=r["color"], linewidth=2.2,
-                   zorder=3, label=f'{r["label"]} · {r["model"]} (Platt-recalibrated)')
+                   zorder=3, label=r["label"])
     ax_cal.set_xlim(0, 1.0)
     ax_cal.set_ylim(0, 1.02)
-    ax_cal.set_xlabel("Mean predicted probability")
-    ax_cal.set_ylabel("Observed frequency")
-    ax_cal.set_title("Calibration (Platt-recalibrated)", fontsize=12, loc="left")
-    ax_cal.legend(loc="upper left", frameon=True, framealpha=0.9, fontsize=9.5)
+    _unit_ticks = np.linspace(0, 1, 6)
+    ax_cal.set_xticks(_unit_ticks)
+    ax_cal.set_yticks(_unit_ticks)
+    ax_cal.set_xticklabels([f"{v:.1f}" for v in _unit_ticks], fontsize=FS_BASE)
+    ax_cal.set_yticklabels([f"{v:.1f}" for v in _unit_ticks], fontsize=FS_BASE)
+    ax_cal.tick_params(axis="both", labelcolor="black", labelleft=True, labelbottom=True)
+    ax_cal.set_xlabel("Mean predicted probability", fontsize=FS_AXIS)
+    ax_cal.set_ylabel("Observed frequency", fontsize=FS_AXIS)
+    ax_cal.set_title("Calibration (Platt-recalibrated)", fontsize=FS_TITLE, loc="left")
+    ax_cal.legend(loc="upper left", frameon=True, framealpha=0.9,
+                  fontsize=FS_LEGEND)
     for s in ("top", "right"):
         ax_cal.spines[s].set_visible(False)
 
@@ -340,15 +356,34 @@ def plot(results):
     y_max = max(r["nb_best"].max() for r in results) + 0.03
     ax_dca.set_xlim(DCA_THRESHOLDS[0], DCA_THRESHOLDS[-1])
     ax_dca.set_ylim(y_min, y_max)
-    ax_dca.set_xlabel("Threshold probability")
-    ax_dca.set_ylabel("Net benefit")
-    ax_dca.set_title("Decision Curve Analysis", fontsize=12, loc="left")
-    ax_dca.legend(loc="upper right", frameon=True, framealpha=0.9, fontsize=8.5)
+    ax_dca.set_xlabel("Threshold probability", fontsize=FS_AXIS)
+    ax_dca.set_ylabel("Net benefit", fontsize=FS_AXIS)
+    ax_dca.set_title("Decision Curve Analysis", fontsize=FS_TITLE, loc="left")
+    cohort_handles = [
+        Line2D([0], [0], color=r["color"], linewidth=2.2, label=r["label"])
+        for r in results
+    ]
+    strategy_handles = [
+        Line2D([0], [0], color="#333333", linewidth=2.2, label="Model"),
+        Line2D([0], [0], color="#666666", linewidth=1.1,
+               linestyle=(0, (1, 1)), label="Treat all"),
+        Line2D([0], [0], color="#888888", linewidth=1.3,
+               linestyle=(0, (5, 4)), label="Treat none"),
+    ]
+    cohort_legend = ax_dca.legend(handles=cohort_handles, loc="upper right",
+                                  frameon=True, framealpha=0.9,
+                                  fontsize=FS_LEGEND, title="Cohort",
+                                  title_fontsize=FS_LEGEND)
+    ax_dca.add_artist(cohort_legend)
+    ax_dca.legend(handles=strategy_handles, loc="lower left",
+                  frameon=True, framealpha=0.9,
+                  fontsize=FS_LEGEND, title="Strategy",
+                  title_fontsize=FS_LEGEND)
     for s in ("top", "right"):
         ax_dca.spines[s].set_visible(False)
 
     fig.suptitle("Cross-cohort calibration & decision-curve analysis — common CatBoost model (2024 test set)",
-                 fontsize=12.5, x=0.5, ha="center")
+                 fontsize=FS_TITLE, x=0.5, ha="center")
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(OUT_PNG, dpi=PNG_DPI, bbox_inches="tight")
     print(f"\nWrote {OUT_PNG} ({PNG_DPI} dpi)")
